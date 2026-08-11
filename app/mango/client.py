@@ -2,6 +2,7 @@
 
 import json
 import logging
+from contextlib import contextmanager
 from typing import Any
 
 import requests
@@ -42,6 +43,7 @@ class MangoClient:
         except requests.RequestException as exc:
             raise MangoNetworkError("MANGO network request failed") from exc
         if response.status_code in (401, 403):
+            response.close()
             raise MangoAuthenticationError("MANGO rejected credentials")
         return response
 
@@ -72,16 +74,30 @@ class MangoClient:
     def statistics_result(self, key: str) -> dict[str, Any]:
         return self.post("/vpbx/stats/calls/result", {"key": key})
 
-    def request_recording_url(self, recording_id: str) -> str:
-        response = self._post_response("/vpbx/queries/recording/post", {"recording_id": recording_id, "action": "download"}, allow_redirects=False)
-        if response.status_code != 302 or not response.headers.get("Location"):
-            raise MangoApiError(f"MANGO recording response status {response.status_code}")
-        return response.headers["Location"]
+    @contextmanager
+    def open_recording(self, recording_id: str):
+        """Open a recording stream without exposing its temporary URL to callers."""
+        redirect_response = self._post_response(
+            "/vpbx/queries/recording/post",
+            {"recording_id": recording_id, "action": "download"},
+            allow_redirects=False,
+        )
+        try:
+            if redirect_response.status_code != 302 or not redirect_response.headers.get("Location"):
+                raise MangoApiError(f"MANGO recording response status {redirect_response.status_code}")
+            temporary_url = redirect_response.headers["Location"]
+        finally:
+            redirect_response.close()
 
-    def get_audio(self, temporary_url: str):
+        response = None
         try:
             response = self.session.get(temporary_url, timeout=self.timeout, stream=True)
             response.raise_for_status()
-            return response
-        except requests.RequestException as exc:
-            raise MangoNetworkError("Recording download failed") from exc
+            yield response
+        except requests.RequestException:
+            # Requests exceptions can embed the one-time URL in both their text and
+            # traceback. Deliberately discard that exception chain at this boundary.
+            raise MangoNetworkError("Recording download failed") from None
+        finally:
+            if response is not None:
+                response.close()
