@@ -10,7 +10,10 @@ def test_paths_are_derived_from_root_and_directories_are_created(tmp_path: Path)
     assert paths.data_dir == root / "data"
     assert paths.logs_dir == root / "logs"
     assert paths.settings_file == root / "data" / "settings.json"
-    assert paths.ensure_directories() == (root / "data", root / "logs")
+    assert paths.downloads_dir == root / "downloads"
+    assert paths.credentials_file == root / "data" / "credentials.dat"
+    assert paths.download_history_file == root / "data" / "download_history.json"
+    assert paths.ensure_directories() == (root / "data", root / "logs", root / "downloads")
     assert paths.data_dir.is_dir()
     assert paths.logs_dir.is_dir()
 

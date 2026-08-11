@@ -36,8 +36,9 @@ def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName("MANGO Downloader")
     try:
-        SettingsStore(paths.settings_file, logger).load()
-        window = MainWindow()
+        settings = SettingsStore(paths.settings_file, logger)
+        settings.load()
+        window = MainWindow(paths, settings)
         window.show()
         return app.exec()
     except Exception:

@@ -1,0 +1,20 @@
+name: Windows CI
+on: [push, pull_request]
+jobs:
+  test-portable:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements/dev.txt
+      - run: pytest
+      - run: python -m compileall -q app tests
+      - shell: cmd
+        run: Build-Portable.bat
+      - shell: pwsh
+        run: |
+          if (!(Test-Path dist/MangoDownloader-portable.zip)) { throw "Portable ZIP missing" }
+          Expand-Archive dist/MangoDownloader-portable.zip dist/smoke
+          & dist/smoke/runtime/python.exe -c "import app; import PySide6; import requests; assert app.__version__ == '0.2.0'"

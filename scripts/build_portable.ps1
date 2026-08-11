@@ -24,14 +24,15 @@ Invoke-WebRequest "https://bootstrap.pypa.io/pip/3.12/get-pip.py" -OutFile $GetP
 
 Copy-Item (Join-Path $Root "app") $Package -Recurse
 Copy-Item (Join-Path $Root "Start.bat") $Package
-New-Item (Join-Path $Package "data"), (Join-Path $Package "logs") -ItemType Directory | Out-Null
+New-Item (Join-Path $Package "data"), (Join-Path $Package "logs"), (Join-Path $Package "downloads") -ItemType Directory | Out-Null
 @"
-MANGO Downloader 0.1.0
+MANGO Downloader 0.2.0
 
 Распакуйте архив полностью и запустите Start.bat.
 Python и установка зависимостей не требуются.
 Настройки: data\settings.json
 Лог: logs\app.log
+Записи по умолчанию: downloads\
 "@ | Set-Content (Join-Path $Package "README.txt") -Encoding UTF8
 
 $Zip = Join-Path $Dist "MangoDownloader-portable.zip"
