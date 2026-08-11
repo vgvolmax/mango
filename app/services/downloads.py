@@ -90,14 +90,14 @@ class DownloadService:
         try:
             for attempt in range(self.retries):
                 try:
-                    response = self.client.get_audio(self.client.request_recording_url(recording_id))
-                    content_type = response.headers.get("Content-Type", "").split(";", 1)[0].lower()
-                    if content_type and content_type not in {"audio/mp3", "audio/mpeg", "application/octet-stream"}:
-                        raise ValueError("Unexpected recording content type")
-                    wrote = 0
-                    with part.open("wb") as stream:
-                        for chunk in response.iter_content(64 * 1024):
-                            if chunk: stream.write(chunk); wrote += len(chunk)
+                    with self.client.open_recording(recording_id) as response:
+                        content_type = response.headers.get("Content-Type", "").split(";", 1)[0].lower()
+                        if content_type and content_type not in {"audio/mp3", "audio/mpeg", "application/octet-stream"}:
+                            raise ValueError("Unexpected recording content type")
+                        wrote = 0
+                        with part.open("wb") as stream:
+                            for chunk in response.iter_content(64 * 1024):
+                                if chunk: stream.write(chunk); wrote += len(chunk)
                     if not wrote: raise ValueError("Empty recording")
                     os.replace(part, target)
                     self.logger.info("Downloaded recording file %s", target.name)
