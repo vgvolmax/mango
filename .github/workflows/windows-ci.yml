@@ -46,3 +46,36 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Embedded runtime smoke-test failed" }
           & dist/smoke/runtime/python.exe -c "import os; from pathlib import Path; from app.core.paths import AppPaths; assert AppPaths.discover().root == Path(os.environ['MANGO_APP_ROOT'])"
           if ($LASTEXITCODE -ne 0) { throw "Portable runtime root smoke-test failed" }
+      - name: Clean source launcher first-run and offline repeat
+        shell: pwsh
+        run: |
+          $source = (Resolve-Path .).Path
+          $target = 'C:\CI Work\Тест MANGO\Mango Downloader'
+          Remove-Item 'C:\CI Work' -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $target | Out-Null
+          robocopy $source $target /E /XD .git .runtime dist build data logs downloads | Out-Host
+          if ($LASTEXITCODE -ge 8) { throw "Source copy failed: $LASTEXITCODE" }
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot;$env:SystemRoot\System32\WindowsPowerShell\v1.0"
+          if (Get-Command python -ErrorAction SilentlyContinue) { throw 'System Python remains visible' }
+          $env:CI = 'true'
+          Push-Location $target
+          try {
+            & .\Start.bat --smoke
+            if ($LASTEXITCODE -ne 0) { throw 'First source launch failed' }
+            $required = '.runtime/python/python.exe', '.runtime/python/pythonw.exe', '.runtime/python/install-receipt.json', '.runtime/site-packages', '.runtime/dependencies-receipt.json', '.runtime/logs/launcher.log'
+            foreach ($item in $required) { if (!(Test-Path $item)) { throw "Launcher output missing: $item" } }
+            & .\.runtime\python\python.exe -c "import platform, app, app.main, PySide6, requests; assert platform.python_version() == '3.13.7'"
+            if ($LASTEXITCODE -ne 0) { throw 'Embedded import validation failed' }
+            $pythonReceipt = (Get-FileHash .runtime/python/install-receipt.json).Hash
+            $dependencyReceipt = (Get-FileHash .runtime/dependencies-receipt.json).Hash
+            $siteMarker = (Get-Item .runtime/site-packages).LastWriteTimeUtc
+            $downloadState = Get-ChildItem .runtime/downloads | ForEach-Object { "$($_.Name):$($_.Length):$($_.LastWriteTimeUtc.Ticks)" }
+            $env:HTTP_PROXY = 'http://127.0.0.1:9'; $env:HTTPS_PROXY = 'http://127.0.0.1:9'
+            & .\Start.bat --smoke
+            if ($LASTEXITCODE -ne 0) { throw 'Offline repeat source launch failed' }
+            if ((Get-FileHash .runtime/python/install-receipt.json).Hash -ne $pythonReceipt) { throw 'Python receipt changed' }
+            if ((Get-FileHash .runtime/dependencies-receipt.json).Hash -ne $dependencyReceipt) { throw 'Dependency receipt changed' }
+            if ((Get-Item .runtime/site-packages).LastWriteTimeUtc -ne $siteMarker) { throw 'Dependencies were republished' }
+            $newDownloadState = Get-ChildItem .runtime/downloads | ForEach-Object { "$($_.Name):$($_.Length):$($_.LastWriteTimeUtc.Ticks)" }
+            if (Compare-Object $downloadState $newDownloadState) { throw 'Downloads changed during offline repeat' }
+          } finally { Pop-Location }

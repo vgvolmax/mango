@@ -72,7 +72,13 @@ Write-Host "Installing runtime dependencies..."
 if ($LASTEXITCODE -ne 0) { throw "Runtime dependency installation failed with exit code $LASTEXITCODE" }
 
 Copy-Item (Join-Path $Root "app") $Package -Recurse
-Copy-Item (Join-Path $Root "Start.bat") $Package
+@"
+@echo off
+setlocal
+set "APP_ROOT=%~dp0"
+set "MANGO_APP_ROOT=%APP_ROOT%"
+start "" /D "%APP_ROOT%" "%APP_ROOT%runtime\pythonw.exe" -m app.main
+"@ | Set-Content (Join-Path $Package "Start.bat") -Encoding ASCII
 New-Item (Join-Path $Package "data"), (Join-Path $Package "logs"), (Join-Path $Package "downloads") -ItemType Directory | Out-Null
 
 Write-Host "Validating embedded runtime imports..."
