@@ -8,7 +8,7 @@ from pathlib import Path
 
 def configure_logging(log_file: Path) -> logging.Logger:
     log_file.parent.mkdir(parents=True, exist_ok=True)
-    logger = logging.getLogger("mango_downloader")
+    logger = logging.getLogger("app")
     logger.setLevel(logging.INFO)
     logger.handlers.clear()
     handler = logging.FileHandler(log_file, encoding="utf-8")

@@ -26,6 +26,18 @@ class AppPaths:
         return self.root / "logs"
 
     @property
+    def downloads_dir(self) -> Path:
+        return self.root / "downloads"
+
+    @property
+    def credentials_file(self) -> Path:
+        return self.data_dir / "credentials.dat"
+
+    @property
+    def download_history_file(self) -> Path:
+        return self.data_dir / "download_history.json"
+
+    @property
     def settings_file(self) -> Path:
         return self.data_dir / "settings.json"
 
@@ -35,7 +47,7 @@ class AppPaths:
 
     def ensure_directories(self) -> tuple[Path, ...]:
         created: list[Path] = []
-        for directory in (self.data_dir, self.logs_dir):
+        for directory in (self.data_dir, self.logs_dir, self.downloads_dir):
             if not directory.exists():
                 directory.mkdir(parents=True, exist_ok=True)
                 created.append(directory)

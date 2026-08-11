@@ -1,0 +1,48 @@
+name: Windows CI
+on: [push, pull_request]
+jobs:
+  test-portable:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: python -m pip install -r requirements/dev.txt
+      - name: pytest
+        run: python -m pytest -v
+      - name: compileall
+        run: python -m compileall -q app tests
+      - name: Build portable package
+        shell: pwsh
+        run: |
+          $buildPython = (Get-Command python).Source
+          & .\Build-Portable.bat $buildPython
+          if ($LASTEXITCODE -ne 0) { throw "Portable build failed" }
+      - name: Validate portable ZIP
+        shell: pwsh
+        run: |
+          if (!(Test-Path dist/MangoDownloader)) { throw "Portable directory missing" }
+          if (!(Test-Path dist/MangoDownloader-portable.zip)) { throw "Portable ZIP missing" }
+          $required = "Start.bat", "app", "runtime", "data", "logs", "downloads", "README.txt"
+          foreach ($item in $required) {
+            if (!(Test-Path (Join-Path dist/MangoDownloader $item))) { throw "Portable item missing: $item" }
+          }
+          if (!(Select-String -Quiet -SimpleMatch "runtime\pythonw.exe" dist/MangoDownloader/Start.bat)) {
+            throw "Start.bat does not use the embedded pythonw.exe"
+          }
+      - name: Expand portable ZIP
+        shell: pwsh
+        run: |
+          Remove-Item dist/smoke -Recurse -Force -ErrorAction SilentlyContinue
+          Expand-Archive dist/MangoDownloader-portable.zip dist/smoke
+      - name: Test embedded runtime and application imports
+        shell: pwsh
+        run: |
+          $env:MANGO_APP_ROOT = (Resolve-Path dist/smoke).Path
+          $runtime = (Resolve-Path dist/smoke/runtime).Path
+          & dist/smoke/runtime/python.exe -c "import sys; from pathlib import Path; import app; import app.main; import PySide6; import requests; runtime = Path(r'$runtime').resolve(); site_packages = (runtime / 'Lib' / 'site-packages').resolve(); assert app.__version__ == '0.2.0'; assert Path(sys.executable).resolve().parent == runtime; assert site_packages in [Path(p).resolve() for p in sys.path if p]; print(sys.executable)"
+          if ($LASTEXITCODE -ne 0) { throw "Embedded runtime smoke-test failed" }
+          & dist/smoke/runtime/python.exe -c "import os; from pathlib import Path; from app.core.paths import AppPaths; assert AppPaths.discover().root == Path(os.environ['MANGO_APP_ROOT'])"
+          if ($LASTEXITCODE -ne 0) { throw "Portable runtime root smoke-test failed" }

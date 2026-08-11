@@ -1,36 +1,31 @@
 # MANGO Downloader
 
-Каркас portable desktop-приложения для Windows 10/11 x64. В PR1 реализованы только GUI и инфраструктура путей, локальных настроек, логирования и сборки. Подключения к MANGO OFFICE API пока нет.
+Portable desktop-приложение для Windows 10/11 x64. Пользователь распаковывает ZIP и запускает `Start.bat`; системный Python и установка пакетов не нужны.
 
-## Структура
+## Что умеет программа
 
-- `app/main.py` — запуск приложения и обработка критических ошибок;
-- `app/core/` — пути, JSON-настройки и логирование;
-- `app/ui/` — окно PySide6;
-- `tests/` — инфраструктурные тесты;
-- `scripts/build_portable.ps1` — воспроизводимая сборка embedded Python runtime;
-- `Start.bat` — единственная точка запуска готового дистрибутива.
+- проверяет подключение к MANGO OFFICE;
+- получает расширенную статистику звонков за выбранный период;
+- скачивает доступные записи в MP3 с защитой от повторной загрузки.
 
-## Разработка
+## Где взять credentials
 
-Требуется Python 3.12 x64:
+Откройте **MANGO OFFICE → Виртуальная АТС → Интеграции → API коннектор**. Там доступны `vpbx_api_key` и `vpbx_api_salt`. Salt хранится только в защищённом Windows DPAPI файле текущего пользователя, а не в `settings.json`.
 
-```bat
-python -m venv .venv
-.venv\Scripts\python -m pip install -r requirements\dev.txt
-.venv\Scripts\python -m app.main
-.venv\Scripts\python -m pytest
-```
+## Использование
 
-## Portable-сборка
+1. Запустите `Start.bat`.
+2. Введите API Key и API Salt.
+3. Нажмите «Проверить подключение».
+4. Выберите период (не больше месяца).
+5. Нажмите «Найти звонки».
+6. Отметьте звонки с записями.
+7. Выберите папку и нажмите «Скачать выбранные».
 
-На Windows запустите `Build-Portable.bat`. Скрипт загружает официальный Python Embedded Distribution зафиксированной версии, устанавливает зафиксированные runtime-зависимости внутрь `runtime/`, копирует приложение и создаёт:
+## Для пользователя
 
-```text
-dist/MangoDownloader/
-dist/MangoDownloader-portable.zip
-```
+Python, pip и доступ к интернету для запуска не нужны. Полностью распакуйте portable ZIP и запустите `Start.bat`. Рабочие данные находятся рядом с приложением: настройки и защищённые credentials — в `data/`, журнал — в `logs/`, записи по умолчанию — в `downloads/`.
 
-Конечному пользователю нужен только ZIP: после распаковки приложение запускается через `Start.bat` и не обращается к системному Python или `PATH`. Инструкция ручного smoke-теста находится в `scripts/SMOKE_TEST.md`.
+## Для разработки и сборки
 
-При запуске каталоги создаются рядом с приложением. Настройки находятся в `data/settings.json`, журнал — в `logs/app.log`.
+Нужен Python 3.12 x64 с pip. Установите `requirements/dev.txt`, затем запускайте `python -m app.main` или `python -m pytest`. На Windows `Build-Portable.bat` создаёт `dist/MangoDownloader-portable.zip` с Python Embedded, PySide6 и requests. Системный Python используется только при сборке; зависимости приложения устанавливаются в portable runtime из `requirements/runtime.txt`.
