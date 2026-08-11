@@ -83,3 +83,16 @@ def test_bootstrap_uses_auto_offer_security_primitives():
 
     assert "get-filehash" not in text
     assert "invoke-webrequest" not in text
+
+
+def test_bootstrap_downloader_matches_auto_offer_timeouts_and_async_read():
+    text = (ROOT / "scripts/launcher/bootstrap.ps1").read_text(encoding="utf-8")
+
+    assert "$client.Timeout = [TimeSpan]::FromSeconds(60)" in text
+    assert "$cancellation.CancelAfter([TimeSpan]::FromMinutes(5))" in text
+    assert "$input.ReadAsync(" in text
+    assert "$cancellation.Token" in text
+    assert "New-Object byte[] (256 * 1024)" in text
+    assert "[Net.Http.HttpCompletionOption]::ResponseHeadersRead" in text
+    assert "$response.Content.Headers.ContentLength" in text
+    assert "$input.Read($buffer" not in text

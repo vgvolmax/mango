@@ -15,7 +15,7 @@ jobs:
       - name: compileall
         run: python -m compileall -q app tests
       - name: Python bootstrap parity acceptance
-        shell: powershell
+        shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $source = 'C:\CI Work\Тест MANGO\Mango Downloader'
