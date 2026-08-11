@@ -1,6 +1,6 @@
 # MANGO Downloader
 
-Portable desktop-приложение для Windows 10/11 x64. Пользователь распаковывает ZIP и запускает `Start.bat`; системный Python и установка пакетов не нужны.
+Desktop-приложение для Windows 10/11 x64 для скачивания записей звонков MANGO OFFICE.
 
 ## Что умеет программа
 
@@ -12,20 +12,14 @@ Portable desktop-приложение для Windows 10/11 x64. Пользова
 
 Откройте **MANGO OFFICE → Виртуальная АТС → Интеграции → API коннектор**. Там доступны `vpbx_api_key` и `vpbx_api_salt`. Salt хранится только в защищённом Windows DPAPI файле текущего пользователя, а не в `settings.json`.
 
-## Использование
+## Запуск
 
-1. Запустите `Start.bat`.
-2. Введите API Key и API Salt.
-3. Нажмите «Проверить подключение».
-4. Выберите период (не больше месяца).
-5. Нажмите «Найти звонки».
-6. Отметьте звонки с записями.
-7. Выберите папку и нажмите «Скачать выбранные».
+Пользовательский one-click launcher находится в процессе миграции на source-ZIP архитектуру.
 
-## Для пользователя
+Целевой контракт: Code → Download ZIP → распаковать → `Start.bat`.
 
-Python, pip и доступ к интернету для запуска не нужны. Полностью распакуйте portable ZIP и запустите `Start.bat`. Рабочие данные находятся рядом с приложением: настройки и защищённые credentials — в `data/`, журнал — в `logs/`, записи по умолчанию — в `downloads/`.
+До завершения launcher migration текущий `main` не считается готовым пользовательским дистрибутивом.
 
-## Для разработки и сборки
+## Для разработки
 
-Нужен Python 3.12 x64 с pip. Установите `requirements/dev.txt`, затем запускайте `python -m app.main` или `python -m pytest`. На Windows `Build-Portable.bat` создаёт `dist/MangoDownloader-portable.zip` с Python Embedded, PySide6 и requests. Системный Python используется только при сборке; зависимости приложения устанавливаются в portable runtime из `requirements/runtime.txt`.
+Нужен Python 3.12 x64 с pip. Установите `requirements/dev.txt`, затем запускайте `python -m app.main` или `python -m pytest`.
