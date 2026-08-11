@@ -1,0 +1,56 @@
+"""MANGO Downloader process entry point."""
+
+from __future__ import annotations
+
+import logging
+import sys
+
+from PySide6.QtWidgets import QApplication, QMessageBox
+
+from app import __version__
+from app.core.logging_setup import configure_logging
+from app.core.paths import AppPaths
+from app.core.settings import SettingsStore
+from app.ui.main_window import MainWindow
+
+
+def main() -> int:
+    paths = AppPaths.discover()
+    created = paths.ensure_directories()
+    logger = configure_logging(paths.log_file)
+
+    def handle_exception(exc_type, exc_value, traceback) -> None:  # type: ignore[no-untyped-def]
+        logger.critical("Unhandled exception", exc_info=(exc_type, exc_value, traceback))
+        QMessageBox.critical(
+            None,
+            "MANGO Downloader",
+            f"Не удалось запустить приложение.\n\nПодробная информация записана в:\n{paths.log_file}",
+        )
+
+    sys.excepthook = handle_exception
+    logger.info("Starting MANGO Downloader version %s", __version__)
+    logger.info("Application root: %s", paths.root)
+    for directory in created:
+        logger.info("Created working directory: %s", directory)
+
+    app = QApplication(sys.argv)
+    app.setApplicationName("MANGO Downloader")
+    try:
+        SettingsStore(paths.settings_file, logger).load()
+        window = MainWindow()
+        window.show()
+        return app.exec()
+    except Exception:
+        logger.exception("Critical startup error")
+        QMessageBox.critical(
+            None,
+            "MANGO Downloader",
+            f"Не удалось запустить приложение.\n\nПодробная информация записана в:\n{paths.log_file}",
+        )
+        return 1
+    finally:
+        logger.info("MANGO Downloader stopped")
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
