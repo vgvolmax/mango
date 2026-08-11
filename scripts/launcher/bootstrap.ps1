@@ -12,13 +12,11 @@ $ManifestPath = Join-Path $PSScriptRoot "runtime-manifest.json"
 $Requirements = Join-Path $Root "requirements\runtime-win-x64.lock.txt"
 $Stage = "initialization"
 
+. (Join-Path $PSScriptRoot "hash.ps1")
+
 function Write-LauncherLog([string]$Operation, [string]$Message) {
     $safe = ($Message -replace "[\r\n]+", " ")
     Add-Content -LiteralPath $Log -Encoding UTF8 -Value ("{0:o} stage={1} operation={2} {3}" -f (Get-Date), $Stage, $Operation, $safe)
-}
-
-function Get-Sha256([string]$Path) {
-    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
 }
 
 function Assert-Hash([string]$Path, [string]$Expected) {

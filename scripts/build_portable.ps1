@@ -14,6 +14,8 @@ $Manifest = Get-Content (Join-Path $Root "scripts\launcher\runtime-manifest.json
 $PythonUrl = $Manifest.python.url
 $BuildPythonError = "Python 3.12 with pip is required to build the portable package."
 
+. (Join-Path $Root "scripts\launcher\hash.ps1")
+
 # Validate the build interpreter before downloading or modifying build output.
 if (!(Test-Path -LiteralPath $BuildPython -PathType Leaf)) {
     throw $BuildPythonError
@@ -36,7 +38,7 @@ if (!(Test-Path $PythonZip)) {
 if (!(Test-Path $PythonZip) -or (Get-Item $PythonZip).Length -eq 0) {
     throw "Embedded Python download is missing or empty: $PythonZip"
 }
-if ((Get-FileHash $PythonZip -Algorithm SHA256).Hash.ToLowerInvariant() -ne $Manifest.python.sha256) {
+if ((Get-Sha256 $PythonZip) -ne $Manifest.python.sha256) {
     throw "Embedded Python SHA-256 verification failed"
 }
 
@@ -85,7 +87,7 @@ $State = [ordered]@{
     schema_version = 1
     python_version = $Manifest.python.version
     python_archive_sha256 = $Manifest.python.sha256
-    requirements_sha256 = (Get-FileHash (Join-Path $Root "requirements\runtime-win-x64.lock.txt") -Algorithm SHA256).Hash.ToLowerInvariant()
+    requirements_sha256 = Get-Sha256 (Join-Path $Root "requirements\runtime-win-x64.lock.txt")
     launcher_contract_version = 1
 }
 $State | ConvertTo-Json | Set-Content (Join-Path $Runtime "install-state.json") -Encoding UTF8

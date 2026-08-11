@@ -33,13 +33,14 @@ jobs:
           if (Get-Command python -ErrorAction SilentlyContinue) { throw "System Python remains available" }
           & "$target\Start.bat" --smoke
           if ($LASTEXITCODE -ne 0) { throw "Clean source Start.bat smoke failed" }
+          . "$env:GITHUB_WORKSPACE\scripts\launcher\hash.ps1"
           $state = Get-Item "$target\runtime\install-state.json"
-          $beforeHash = (Get-FileHash $state).Hash; $beforeWrite = $state.LastWriteTimeUtc
+          $beforeHash = Get-Sha256 $state.FullName; $beforeWrite = $state.LastWriteTimeUtc
           $env:HTTP_PROXY = "http://127.0.0.1:9"; $env:HTTPS_PROXY = "http://127.0.0.1:9"
           & "$target\Start.bat" --smoke
           if ($LASTEXITCODE -ne 0) { throw "Offline repeat Start.bat smoke failed" }
           $state = Get-Item "$target\runtime\install-state.json"
-          if ((Get-FileHash $state).Hash -ne $beforeHash -or $state.LastWriteTimeUtc -ne $beforeWrite) { throw "Valid runtime state was rewritten" }
+          if ((Get-Sha256 $state.FullName) -ne $beforeHash -or $state.LastWriteTimeUtc -ne $beforeWrite) { throw "Valid runtime state was rewritten" }
       - name: Validate portable ZIP
         shell: pwsh
         run: |
