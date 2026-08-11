@@ -38,7 +38,10 @@ class WindowsDpapiBackend:
         try:
             return ctypes.string_at(target.pbData, target.cbData)
         finally:
-            ctypes.windll.kernel32.LocalFree(target.pbData)
+            local_free = ctypes.windll.kernel32.LocalFree
+            local_free.argtypes = [ctypes.c_void_p]
+            local_free.restype = ctypes.c_void_p
+            local_free(target.pbData)
 
     def protect(self, data: bytes) -> bytes:
         return self._convert(data, "CryptProtectData")

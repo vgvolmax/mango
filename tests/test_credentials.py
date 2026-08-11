@@ -1,4 +1,8 @@
-from app.core.credentials import CredentialsStore
+import os
+
+import pytest
+
+from app.core.credentials import CredentialsStore, WindowsDpapiBackend
 
 
 class ReverseBackend:
@@ -13,3 +17,11 @@ def test_credentials_roundtrip_and_delete(tmp_path):
     assert store.load() == ("key", "secret")
     store.delete()
     assert store.load() is None
+
+
+@pytest.mark.skipif(os.name != "nt", reason="DPAPI is available only on Windows")
+def test_windows_dpapi_roundtrip():
+    backend = WindowsDpapiBackend()
+    plain = b"MANGO DPAPI smoke test"
+
+    assert backend.unprotect(backend.protect(plain)) == plain

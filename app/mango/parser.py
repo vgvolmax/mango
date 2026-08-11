@@ -24,13 +24,22 @@ def _timestamp(value: Any) -> datetime | None:
         return None
 
 
-def parse_calls(payload: dict[str, Any]) -> list[CallRecord]:
+def _extract_entries(payload: dict[str, Any]) -> list[dict[str, Any]]:
     data = payload.get("data", payload)
-    entries = data.get("list", []) if isinstance(data, dict) else []
-    result: list[CallRecord] = []
-    for entry in entries if isinstance(entries, list) else []:
-        if not isinstance(entry, dict):
+    blocks = data if isinstance(data, list) else [data]
+    entries: list[dict[str, Any]] = []
+    for block in blocks:
+        if not isinstance(block, dict):
             continue
+        block_entries = block.get("list", [])
+        if isinstance(block_entries, list):
+            entries.extend(entry for entry in block_entries if isinstance(entry, dict))
+    return entries
+
+
+def parse_calls(payload: dict[str, Any]) -> list[CallRecord]:
+    result: list[CallRecord] = []
+    for entry in _extract_entries(payload):
         raw_direction = entry.get("context_type", 3)
         try:
             direction = CallDirection(int(raw_direction))
