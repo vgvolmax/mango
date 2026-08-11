@@ -94,3 +94,12 @@ def test_bootstrap_downloader_matches_auto_offer_timeouts_and_async_read():
     assert "[Net.Http.HttpCompletionOption]::ResponseHeadersRead" in text
     assert "$response.Content.Headers.ContentLength" in text
     assert "$input.Read($buffer" not in text
+
+
+def test_handoff_holds_lock_and_runtime_smoke_bypasses_launcher():
+    text = (ROOT / "scripts/launcher/bootstrap.ps1").read_text(encoding="utf-8")
+    runtime_branch = text.split("if ($RuntimeSmoke)", 1)[1].split("else", 1)[0]
+    assert "launcher.py" not in runtime_branch
+    assert "$env:MANGO_BOOTSTRAP_LOCK_HELD = '1'" in text
+    assert "Remove-Item Env:MANGO_BOOTSTRAP_LOCK_HELD" in text
+    assert text.index("Remove-Item Env:MANGO_BOOTSTRAP_LOCK_HELD") < text.index("$Lock.Unlock(0,1)")

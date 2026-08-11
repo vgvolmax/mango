@@ -1,4 +1,4 @@
-"""Prepare pinned application dependencies and start MANGO Downloader."""
+"""Prepare pinned pip and application dependencies, then start MANGO."""
 
 from __future__ import annotations
 
@@ -8,53 +8,159 @@ import logging
 from logging.handlers import RotatingFileHandler
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
 import uuid
+import zipfile
 
-PYTHON_VERSION = "3.13.7"
-PIP_VERSION = "24.3.1"
-CONTRACT_VERSION = 2
-EXPECTED_PACKAGES = {"pyside6": "6.8.1", "requests": "2.32.3"}
+LAUNCHER_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(LAUNCHER_DIR))
+from portable_download import ensure_download
 
 ROOT = Path(__file__).resolve().parents[2]
 RUNTIME = ROOT / ".runtime"
+PIP_DIR = RUNTIME / "pip"
 SITE_PACKAGES = RUNTIME / "site-packages"
+MANIFEST_PATH = LAUNCHER_DIR / "runtime-manifest.json"
 REQUIREMENTS = ROOT / "requirements" / "runtime-win-x64.lock.txt"
 RECEIPT = RUNTIME / "dependencies-receipt.json"
 LOG_PATH = RUNTIME / "logs" / "launcher.log"
+PIP_RUNNER = Path(__file__).with_name("pip_runner.py")
+RUN_APP = Path(__file__).with_name("run_app.py")
+PIN = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)==([A-Za-z0-9][A-Za-z0-9.!+_-]*)$")
 
 
 def configure_logger() -> logging.Logger:
     LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
     logger = logging.getLogger("mango.launcher")
     logger.setLevel(logging.INFO)
-    handler = RotatingFileHandler(
-        LOG_PATH, maxBytes=2 * 1024 * 1024, backupCount=4, encoding="utf-8"
-    )
+    handler = RotatingFileHandler(LOG_PATH, maxBytes=2 * 1024 * 1024, backupCount=4, encoding="utf-8")
     handler.setFormatter(logging.Formatter("%(asctime)s stage=%(stage)s %(message)s"))
     logger.handlers[:] = [handler]
     return logger
 
 
-def requirements_sha256() -> str:
-    return hashlib.sha256(REQUIREMENTS.read_bytes()).hexdigest()
+def load_manifest() -> dict[str, object]:
+    manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8-sig"))
+    if manifest.get("schema_version") != 1:
+        raise ValueError("Unsupported runtime manifest schema")
+    for key in ("launcher_version", "python", "pip", "download_hosts"):
+        if not manifest.get(key):
+            raise ValueError(f"Runtime manifest is missing {key}")
+    pip = manifest["pip"]
+    python = manifest["python"]
+    if not isinstance(pip, dict) or not isinstance(python, dict):
+        raise ValueError("Invalid runtime manifest sections")
+    for section in (pip, python):
+        if not section.get("version") or not section.get("sha256"):
+            raise ValueError("Runtime manifest artifact is incomplete")
+    if not pip.get("url") or not re.fullmatch(r"[0-9a-f]{64}", str(pip["sha256"])):
+        raise ValueError("Invalid pip artifact manifest")
+    return manifest
 
 
-def expected_receipt() -> dict[str, object]:
+def parse_lock_file(path: Path = REQUIREMENTS) -> dict[str, str]:
+    pins: dict[str, str] = {}
+    for number, raw in enumerate(path.read_text(encoding="utf-8-sig").splitlines(), 1):
+        if not raw:
+            continue
+        match = PIN.fullmatch(raw)
+        if not match:
+            raise ValueError(f"Invalid requirement at line {number}: exact name==version pins only")
+        name, version = match.groups()
+        normalized = name.casefold().replace("_", "-").replace(".", "-")
+        if normalized in pins:
+            raise ValueError(f"Duplicate requirement at line {number}: {name}")
+        pins[normalized] = version
+    if not {"pyside6", "requests"}.issubset(pins):
+        raise ValueError("Runtime lock must pin PySide6 and requests")
+    return pins
+
+
+def _hash(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def pip_receipt(manifest: dict[str, object]) -> dict[str, object]:
+    pip = manifest["pip"]
+    assert isinstance(pip, dict)
+    return {"schema_version": 1, "version": pip["version"], "sha256": pip["sha256"]}
+
+
+def dependency_receipt(manifest: dict[str, object]) -> dict[str, object]:
+    python, pip = manifest["python"], manifest["pip"]
+    assert isinstance(python, dict) and isinstance(pip, dict)
     return {
         "schema_version": 1,
-        "python_version": PYTHON_VERSION,
-        "pip_version": PIP_VERSION,
-        "requirements_sha256": requirements_sha256(),
-        "launcher_contract_version": CONTRACT_VERSION,
+        "launcher_version": manifest["launcher_version"],
+        "python_version": python["version"],
+        "pip_version": pip["version"],
+        "pip_sha256": pip["sha256"],
+        "requirements_sha256": _hash(REQUIREMENTS),
     }
 
 
-def validation_code(directory: Path) -> str:
-    # Remove the active dependency directory before adding the candidate. This makes
-    # staging validation unable to succeed by accidentally importing an old install.
+def _receipt_matches(path: Path, expected: dict[str, object]) -> bool:
+    try:
+        return json.loads(path.read_text(encoding="utf-8-sig")) == expected
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return False
+
+
+def _write_receipt(path: Path, value: dict[str, object]) -> None:
+    temporary = path.with_name(path.name + f".new-{os.getpid()}")
+    temporary.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+    os.replace(temporary, path)
+
+
+def validate_pip(directory: Path, manifest: dict[str, object]) -> bool:
+    if not directory.is_dir() or not _receipt_matches(directory / "install-receipt.json", pip_receipt(manifest)):
+        return False
+    pip = manifest["pip"]
+    assert isinstance(pip, dict)
+    result = subprocess.run(
+        [sys.executable, str(PIP_RUNNER), str(directory), "--version"],
+        cwd=ROOT, shell=False, check=False, capture_output=True, text=True,
+    )
+    return result.returncode == 0 and str(pip["version"]) in result.stdout
+
+
+def prepare_pip(manifest: dict[str, object], logger: logging.Logger) -> None:
+    pip = manifest["pip"]
+    assert isinstance(pip, dict)
+    wheel = RUNTIME / "downloads" / f"pip-{pip['version']}-py3-none-any.whl"
+    ensure_download(str(pip["url"]), wheel, str(pip["sha256"]), list(manifest["download_hosts"]))
+    if validate_pip(PIP_DIR, manifest):
+        logger.info("Pinned pip is ready; preparation skipped", extra={"stage": "pip"})
+        return
+    for stale in RUNTIME.glob("pip.new-*"):
+        if stale.is_dir():
+            shutil.rmtree(stale, ignore_errors=True)
+    staging = RUNTIME / f"pip.new-{os.getpid()}-{uuid.uuid4().hex}"
+    old = RUNTIME / f"pip.old-{os.getpid()}-{uuid.uuid4().hex}"
+    staging.mkdir(parents=True)
+    try:
+        with zipfile.ZipFile(wheel) as archive:
+            root = staging.resolve()
+            for member in archive.infolist():
+                if re.search(r"(^|/)[^/]+\.data/", member.filename):
+                    raise ValueError("Pinned pip wheel unexpectedly contains a .data layout")
+                target = (staging / member.filename).resolve()
+                if target != root and root not in target.parents:
+                    raise ValueError(f"Unsafe pip wheel entry: {member.filename}")
+            archive.extractall(staging)
+        _write_receipt(staging / "install-receipt.json", pip_receipt(manifest))
+        if not validate_pip(staging, manifest):
+            raise RuntimeError("Staged pip tool failed validation")
+        _publish(staging, PIP_DIR, old)
+        logger.info("Pinned pip was prepared", extra={"stage": "pip"})
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+
+
+def validation_code(directory: Path, pins: dict[str, str]) -> str:
     return f"""
 import sys
 from importlib.metadata import distributions
@@ -65,64 +171,58 @@ sys.path.insert(0, {str(directory)!r})
 import PySide6
 import requests
 import app.main
-versions = {{d.metadata['Name'].casefold(): d.version for d in distributions(path=[{str(directory)!r}])}}
-assert versions.get('pyside6') == '6.8.1', versions
-assert versions.get('requests') == '2.32.3', versions
+normalize = lambda name: name.casefold().replace('_', '-').replace('.', '-')
+versions = {{normalize(d.metadata['Name']): d.version for d in distributions(path=[{str(directory)!r}])}}
+assert versions == {pins!r}, (versions, {pins!r})
 """
 
 
-def validate(directory: Path) -> bool:
+def validate_dependencies(directory: Path, pins: dict[str, str]) -> bool:
     if not directory.is_dir():
         return False
-    result = subprocess.run(
-        [sys.executable, "-c", validation_code(directory)],
-        cwd=ROOT,
-        shell=False,
-        check=False,
-    )
-    return result.returncode == 0
+    return subprocess.run(
+        [sys.executable, "-c", validation_code(directory, pins)],
+        cwd=ROOT, shell=False, check=False,
+    ).returncode == 0
 
 
-def dependencies_ready() -> bool:
+def _publish(staging: Path, active: Path, old: Path) -> None:
+    shutil.rmtree(old, ignore_errors=True)
+    had_active = active.exists()
+    if had_active:
+        active.replace(old)
     try:
-        if json.loads(RECEIPT.read_text(encoding="utf-8-sig")) != expected_receipt():
-            return False
-    except (OSError, UnicodeError, json.JSONDecodeError):
-        return False
-    return validate(SITE_PACKAGES)
+        staging.replace(active)
+    except Exception:
+        if had_active and not active.exists():
+            old.replace(active)
+        raise
+    shutil.rmtree(old, ignore_errors=True)
 
 
-def install_dependencies(logger: logging.Logger) -> None:
+def prepare_dependencies(manifest: dict[str, object], pins: dict[str, str], logger: logging.Logger) -> None:
+    expected = dependency_receipt(manifest)
+    if _receipt_matches(RECEIPT, expected) and validate_dependencies(SITE_PACKAGES, pins):
+        logger.info("Pinned dependencies are ready; installation skipped", extra={"stage": "dependencies"})
+        return
+    for stale in RUNTIME.glob("site-packages.new-*"):
+        if stale.is_dir():
+            shutil.rmtree(stale, ignore_errors=True)
     staging = RUNTIME / f"site-packages.new-{os.getpid()}-{uuid.uuid4().hex}"
-    old = RUNTIME / f"site-packages.old-{os.getpid()}"
-    shutil.rmtree(staging, ignore_errors=True)
+    old = RUNTIME / f"site-packages.old-{os.getpid()}-{uuid.uuid4().hex}"
     staging.mkdir(parents=True)
     try:
         command = [
-            sys.executable, "-m", "pip", "install",
+            sys.executable, str(PIP_RUNNER), str(PIP_DIR), "install",
             "--disable-pip-version-check", "--no-input", "--no-cache-dir",
             "--no-compile", "--only-binary=:all:", "--target", str(staging),
             "-r", str(REQUIREMENTS),
         ]
-        logger.info("Installing pinned binary dependencies into staging", extra={"stage": "dependencies"})
         subprocess.run(command, cwd=ROOT, shell=False, check=True)
-        if not validate(staging):
-            raise RuntimeError("Staged dependencies failed import or version validation")
-
-        shutil.rmtree(old, ignore_errors=True)
-        had_active = SITE_PACKAGES.exists()
-        if had_active:
-            SITE_PACKAGES.replace(old)
-        try:
-            staging.replace(SITE_PACKAGES)
-        except Exception:
-            if had_active and not SITE_PACKAGES.exists():
-                old.replace(SITE_PACKAGES)
-            raise
-        shutil.rmtree(old, ignore_errors=True)
-        temporary = RECEIPT.with_suffix(".json.new")
-        temporary.write_text(json.dumps(expected_receipt(), indent=2) + "\n", encoding="utf-8")
-        os.replace(temporary, RECEIPT)
+        if not validate_dependencies(staging, pins):
+            raise RuntimeError("Staged dependencies failed validation")
+        _publish(staging, SITE_PACKAGES, old)
+        _write_receipt(RECEIPT, expected)
     finally:
         shutil.rmtree(staging, ignore_errors=True)
 
@@ -132,13 +232,12 @@ def launch(mode: str, logger: logging.Logger) -> int:
     environment.update(MANGO_APP_ROOT=str(ROOT), PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
     if mode == "--smoke":
         return subprocess.run(
-            [sys.executable, "-m", "app.smoke"], cwd=ROOT, env=environment,
+            [sys.executable, str(RUN_APP), "--smoke"], cwd=ROOT, env=environment,
             shell=False, check=False,
         ).returncode
     pythonw = Path(sys.executable).with_name("pythonw.exe")
     subprocess.Popen(
-        [str(pythonw), "-m", "app.main"], cwd=ROOT, env=environment,
-        shell=False,
+        [str(pythonw), str(RUN_APP), "start"], cwd=ROOT, env=environment, shell=False,
     )
     logger.info("GUI process started", extra={"stage": "launch"})
     return 0
@@ -146,22 +245,20 @@ def launch(mode: str, logger: logging.Logger) -> int:
 
 def main() -> int:
     logger = configure_logger()
-    mode = sys.argv[1] if len(sys.argv) > 1 else "start"
     try:
-        if not dependencies_ready():
-            install_dependencies(logger)
-        else:
-            logger.info("Pinned dependencies are ready; installation skipped", extra={"stage": "dependencies"})
+        if os.environ.get("MANGO_BOOTSTRAP_LOCK_HELD") != "1":
+            raise RuntimeError("launcher mutations must run under bootstrap lock")
+        manifest = load_manifest()
+        pins = parse_lock_file()
+        prepare_pip(manifest, logger)
+        prepare_dependencies(manifest, pins, logger)
+        mode = sys.argv[1] if len(sys.argv) > 1 else "start"
         return launch(mode, logger)
     except Exception:
         logger.exception("Launcher preparation failed", extra={"stage": "failure"})
         print(
-            "MANGO Downloader could not start.\n"
-            "Stage: portable dependency preparation.\n"
-            "The prepared Python and verified downloads were preserved.\n"
-            "The dependency step will be retried next time.\n"
-            f"Details: {LOG_PATH}",
-            file=sys.stderr,
+            "MANGO Downloader could not start. See .runtime/logs/launcher.log; "
+            "preparation will be retried next time.", file=sys.stderr,
         )
         return 1
 
