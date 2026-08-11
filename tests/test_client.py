@@ -47,3 +47,23 @@ def test_statistics_requires_key_and_rejects_error_states():
     with pytest.raises(MangoApiError): MangoClient("key", "salt", session=Session(Response({}))).request_statistics({})
     assert MangoClient("key", "salt", session=Session(Response({"status": "work"}))).statistics_result("k")["status"] == "work"
     with pytest.raises(MangoApiError): MangoClient("key", "salt", session=Session(Response({"status": "not-found"}))).statistics_result("k")
+
+
+@pytest.mark.parametrize("value", [
+    {"result": 1000},
+    {"status": "work"},
+    {"status": "complete"},
+])
+def test_client_accepts_numeric_success_and_active_async_statuses(value):
+    assert MangoClient("key", "salt", session=Session(Response(value))).post("/path", {}) == value
+
+
+@pytest.mark.parametrize("value", [{"result": 5000}, {"status": "error"}])
+def test_client_rejects_numeric_and_async_errors(value):
+    with pytest.raises(MangoApiError):
+        MangoClient("key", "salt", session=Session(Response(value))).post("/path", {})
+
+
+def test_check_credentials_rejects_numeric_api_error():
+    with pytest.raises(MangoApiError):
+        MangoClient("key", "salt", session=Session(Response({"result": 5000}))).check_credentials()

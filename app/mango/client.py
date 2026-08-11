@@ -9,6 +9,20 @@ import requests
 from .auth import make_signature
 from .errors import MangoApiError, MangoAuthenticationError, MangoNetworkError
 
+MANGO_SUCCESS = 1000
+FAILED_OPERATION_STATUSES = {"error", "cancel", "not-found"}
+
+
+def _validate_api_result(value: dict[str, Any]) -> None:
+    result = value.get("result")
+    if isinstance(result, (int, float)) and not isinstance(result, bool):
+        if result != MANGO_SUCCESS:
+            raise MangoApiError(f"MANGO API returned result code {result}")
+
+    status = str(value.get("status") or "").lower()
+    if status in FAILED_OPERATION_STATUSES:
+        raise MangoApiError(f"MANGO operation failed: {status}")
+
 
 class MangoClient:
     BASE_URL = "https://app.mango-office.ru"
@@ -42,9 +56,7 @@ class MangoClient:
             raise MangoApiError("MANGO returned malformed JSON") from exc
         if not isinstance(value, dict):
             raise MangoApiError("MANGO returned an unexpected response")
-        code = str(value.get("status") or value.get("result") or "").lower()
-        if code in {"error", "cancel", "not-found"}:
-            raise MangoApiError(f"MANGO operation failed: {code}")
+        _validate_api_result(value)
         return value
 
     def check_credentials(self) -> None:

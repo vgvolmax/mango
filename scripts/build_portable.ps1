@@ -9,7 +9,13 @@ $PythonUrl = "https://www.python.org/ftp/python/$PythonVersion/python-$PythonVer
 
 Remove-Item $Package -Recurse -Force -ErrorAction SilentlyContinue
 New-Item $Cache, $Package -ItemType Directory -Force | Out-Null
-if (!(Test-Path $PythonZip)) { Invoke-WebRequest $PythonUrl -OutFile $PythonZip }
+Write-Host "Downloading embedded Python..."
+if (!(Test-Path $PythonZip)) {
+    Invoke-WebRequest -UseBasicParsing -Uri $PythonUrl -OutFile $PythonZip
+}
+if (!(Test-Path $PythonZip) -or (Get-Item $PythonZip).Length -eq 0) {
+    throw "Embedded Python download is missing or empty: $PythonZip"
+}
 
 $Runtime = Join-Path $Package "runtime"
 Expand-Archive $PythonZip $Runtime
@@ -18,11 +24,17 @@ $Pth = Get-ChildItem $Runtime -Filter "python*._pth" | Select-Object -First 1
 Add-Content $Pth.FullName ".." -Encoding ASCII
 
 $GetPip = Join-Path $Cache "get-pip.py"
-Invoke-WebRequest "https://bootstrap.pypa.io/pip/3.12/get-pip.py" -OutFile $GetPip
+Write-Host "Bootstrapping pip..."
+Invoke-WebRequest -UseBasicParsing -Uri "https://bootstrap.pypa.io/pip/3.12/get-pip.py" -OutFile $GetPip
+if (!(Test-Path $GetPip) -or (Get-Item $GetPip).Length -eq 0) {
+    throw "pip bootstrap download is missing or empty: $GetPip"
+}
 & (Join-Path $Runtime "python.exe") $GetPip "pip==24.3.1" --no-warn-script-location
 if ($LASTEXITCODE -ne 0) { throw "pip bootstrap failed with exit code $LASTEXITCODE" }
+Write-Host "Installing runtime dependencies..."
 & (Join-Path $Runtime "python.exe") -m pip install --no-compile --requirement (Join-Path $Root "requirements\runtime.txt")
 if ($LASTEXITCODE -ne 0) { throw "Runtime dependency installation failed with exit code $LASTEXITCODE" }
+Write-Host "Validating embedded runtime imports..."
 & (Join-Path $Runtime "python.exe") -c "import PySide6; import requests"
 if ($LASTEXITCODE -ne 0) { throw "Runtime dependency import check failed with exit code $LASTEXITCODE" }
 
@@ -41,5 +53,6 @@ Python и установка зависимостей не требуются.
 
 $Zip = Join-Path $Dist "MangoDownloader-portable.zip"
 Remove-Item $Zip -Force -ErrorAction SilentlyContinue
+Write-Host "Creating portable ZIP..."
 Compress-Archive (Join-Path $Package "*") $Zip -CompressionLevel Optimal
 Write-Host "Portable package created: $Zip"

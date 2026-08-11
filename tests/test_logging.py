@@ -14,3 +14,18 @@ def test_logging_creates_utf8_log_file(tmp_path: Path) -> None:
     assert log_file.is_file()
     assert "Запуск приложения" in log_file.read_text(encoding="utf-8")
     logger.handlers.clear()
+
+
+def test_child_application_loggers_write_once_to_file(tmp_path: Path) -> None:
+    log_file = tmp_path / "logs" / "app.log"
+    logger = configure_logging(log_file)
+
+    logging.getLogger("app.services.calls").error("Ошибка MANGO")
+    logging.getLogger("app.mango.client").error("Ошибка клиента")
+    for handler in logger.handlers:
+        handler.flush()
+
+    contents = log_file.read_text(encoding="utf-8")
+    assert contents.count("Ошибка MANGO") == 1
+    assert contents.count("Ошибка клиента") == 1
+    logger.handlers.clear()
