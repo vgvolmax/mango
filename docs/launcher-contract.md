@@ -2,8 +2,8 @@
 
 ## Canonical user flow
 
-GitHub → Code → Download ZIP
-→ extract completely
+Download the repository folder
+→ extract it completely
 → Start.bat
 → first-run local runtime preparation
 → application
@@ -55,12 +55,17 @@ Any deviation from Auto Offer must be explicitly justified in the PR description
 
 ## Mango-specific layer
 
-PowerShell then prepares the pinned pip wheel, writes the controlled embedded
-Python search paths, and hands off under the same OS lock to `launcher.py`.
-The Python launcher installs the fully pinned binary-only dependency graph into a
-staging directory, validates it, publishes it atomically, and records its state.
+PowerShell owns portable Python only. After validating or repairing Python it
+hands off under the same OS lock to the dependency-free `launcher.py`; it never
+changes the published `.runtime/python` directory.
+
+The Python launcher owns the verified pinned pip tool, the fully pinned
+binary-only application dependency graph, and application launch. It installs
+into staging directories, validates them, publishes them atomically, and records
+their state. Dedicated stdlib runners add pip or application dependencies to the
+child process `sys.path`; the embedded Python `_pth` file is never modified.
 `--smoke` constructs and closes the GUI offscreen; normal launch spawns
-`.runtime/python/pythonw.exe -m app.main`.
+`.runtime/python/pythonw.exe scripts/launcher/run_app.py start`.
 
 ## Forbidden competing architecture
 

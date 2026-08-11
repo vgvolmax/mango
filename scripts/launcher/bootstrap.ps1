@@ -11,7 +11,6 @@ $RuntimeDir = Join-Path $Root '.runtime'
 $PythonDir = Join-Path $RuntimeDir 'python'
 $DownloadsDir = Join-Path $RuntimeDir 'downloads'
 $ArchivePath = Join-Path $DownloadsDir 'python.zip'
-$PipDir = Join-Path $RuntimeDir 'pip'
 $LockPath = Join-Path $RuntimeDir 'launcher.lock'
 $ManifestPath = Join-Path $PSScriptRoot 'runtime-manifest.json'
 $ReceiptName = 'install-receipt.json'
@@ -215,89 +214,6 @@ function Install-PortablePython($PythonSpec, [string[]]$AllowedHosts) {
     }
 }
 
-function Test-PipTool([string]$Directory, $PipSpec) {
-    $receiptPath = Join-Path $Directory $ReceiptName
-    if (-not [IO.File]::Exists($receiptPath)) { return $false }
-    try {
-        $receipt = Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
-        if ([int]$receipt.schema_version -ne 1 -or
-            [string]$receipt.version -cne [string]$PipSpec.version -or
-            [string]$receipt.sha256 -cne [string]$PipSpec.sha256) { return $false }
-        $escaped = $Directory.Replace("'", "''")
-        & (Join-Path $PythonDir 'python.exe') -c "import sys; sys.path.insert(0, r'$escaped'); import pip; assert pip.__version__ == '24.3.1'"
-        return $LASTEXITCODE -eq 0
-    }
-    catch { return $false }
-}
-
-function Install-PipTool($PipSpec, [string[]]$AllowedHosts) {
-    $wheelName = "pip-$($PipSpec.version)-py3-none-any.whl"
-    $wheelPath = Join-Path $DownloadsDir $wheelName
-    if ([IO.File]::Exists($wheelPath) -and (Get-Sha256 $wheelPath) -cne [string]$PipSpec.sha256) {
-        Remove-Item -LiteralPath $wheelPath -Force
-    }
-    if (-not [IO.File]::Exists($wheelPath)) {
-        $partPath = "$wheelPath.part"
-        for ($attempt = 1; $attempt -le 3; $attempt++) {
-            Remove-Item -LiteralPath $partPath -Force -ErrorAction SilentlyContinue
-            try {
-                Invoke-StreamingDownload ([Uri]$PipSpec.url) $partPath $AllowedHosts
-                if ((Get-Sha256 $partPath) -cne [string]$PipSpec.sha256) { throw 'Downloaded pip wheel SHA-256 does not match the manifest.' }
-                Move-Item -LiteralPath $partPath -Destination $wheelPath -Force
-                break
-            }
-            catch [Net.Http.HttpRequestException], [Threading.Tasks.TaskCanceledException], [IO.IOException] {
-                Remove-Item -LiteralPath $partPath -Force -ErrorAction SilentlyContinue
-                if ($attempt -eq 3) { throw }
-                Start-Sleep -Seconds 2
-            }
-        }
-    }
-
-    Get-ChildItem -LiteralPath $RuntimeDir -Directory -Filter 'pip.new-*' -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force
-    $staging = Join-Path $RuntimeDir ("pip.new-{0}-{1}" -f $PID, [Guid]::NewGuid().ToString('N'))
-    $old = Join-Path $RuntimeDir ("pip.old-{0}" -f $PID)
-    try {
-        $zip = [IO.Compression.ZipFile]::OpenRead($wheelPath)
-        try {
-            foreach ($entry in $zip.Entries) {
-                if ($entry.FullName -match '(^|/)[^/]+\.data/') { throw 'Pinned pip wheel unexpectedly contains a .data layout.' }
-            }
-        }
-        finally { $zip.Dispose() }
-        Expand-SafeArchive $wheelPath $staging
-        [ordered]@{ schema_version = 1; version = [string]$PipSpec.version; sha256 = [string]$PipSpec.sha256 } |
-            ConvertTo-Json | Set-Content -LiteralPath (Join-Path $staging $ReceiptName) -Encoding UTF8
-        if (-not (Test-PipTool $staging $PipSpec)) { throw 'Staged pip tool failed validation.' }
-        $hadActive = [IO.Directory]::Exists($PipDir)
-        if ($hadActive) { Move-Item -LiteralPath $PipDir -Destination $old }
-        try { Move-Item -LiteralPath $staging -Destination $PipDir }
-        catch {
-            if ($hadActive -and -not [IO.Directory]::Exists($PipDir)) { Move-Item -LiteralPath $old -Destination $PipDir }
-            throw
-        }
-        if ([IO.Directory]::Exists($old)) { Remove-Item -LiteralPath $old -Recurse -Force }
-    }
-    finally { if ([IO.Directory]::Exists($staging)) { Remove-Item -LiteralPath $staging -Recurse -Force } }
-}
-
-function Set-ApplicationPythonPaths {
-    $path = Join-Path $PythonDir 'python313._pth'
-    $temporary = "$path.new"
-    $canonical = "python313.zip`r`n.`r`n..\pip`r`n..\site-packages`r`n..\..`r`n"
-    [IO.File]::WriteAllText($temporary, $canonical, [Text.UTF8Encoding]::new($false))
-    if ([IO.File]::ReadAllText($temporary) -cne $canonical) { throw 'Embedded Python path validation failed.' }
-    if (-not [IO.File]::Exists($path) -or [IO.File]::ReadAllText($path) -cne $canonical) {
-        if ([IO.File]::Exists($path)) {
-            $backup = "$path.backup-$PID-$([Guid]::NewGuid().ToString('N'))"
-            [IO.File]::Replace($temporary, $path, $backup)
-            [IO.File]::Delete($backup)
-        }
-        else { [IO.File]::Move($temporary, $path) }
-    }
-    else { Remove-Item -LiteralPath $temporary -Force }
-}
-
 [IO.Directory]::CreateDirectory($RuntimeDir) | Out-Null
 [IO.Directory]::CreateDirectory($DownloadsDir) | Out-Null
 $Lock = [IO.File]::Open(
@@ -326,7 +242,7 @@ try {
         [string]::IsNullOrWhiteSpace([string]$manifest.python.url) -or
         [string]$manifest.python.sha256 -notmatch '^[0-9a-f]{64}$' -or
         [string]$manifest.python.executable -cne 'python.exe' -or
-        [string]$manifest.pip.version -cne '24.3.1' -or
+        [string]::IsNullOrWhiteSpace([string]$manifest.pip.version) -or
         [string]::IsNullOrWhiteSpace([string]$manifest.pip.url) -or
         [string]$manifest.pip.sha256 -notmatch '^[0-9a-f]{64}$') {
         throw 'Invalid runtime manifest.'
@@ -342,19 +258,12 @@ try {
     Write-Host 'Portable Python: verified and ready'
 
     if ($RuntimeSmoke) {
-        & (Join-Path $PythonDir 'python.exe') -c "import platform; assert platform.python_version() == '3.13.7'"
+        & (Join-Path $PythonDir 'python.exe') -c 'import platform, sys; assert platform.python_version() == sys.argv[1]' ([string]$manifest.python.version)
         if ($LASTEXITCODE -ne 0) { throw 'Portable Python runtime smoke failed.' }
     }
     else {
-        Write-Host '[2/3] Preparing pinned pip tool...'
-        if (-not (Test-PipTool $PipDir $manifest.pip)) {
-            Install-PipTool $manifest.pip ([string[]]$manifest.download_hosts)
-        }
-        if (-not (Test-PipTool $PipDir $manifest.pip)) { throw 'Pinned pip tool validation failed.' }
-        Set-ApplicationPythonPaths
-        Write-Host 'pip 24.3.1: verified and ready'
-        Write-Host '[3/3] Preparing application...'
         $mode = if ($args -contains '--smoke') { '--smoke' } else { 'start' }
+        $env:MANGO_BOOTSTRAP_LOCK_HELD = '1'
         & (Join-Path $PythonDir 'python.exe') (Join-Path $PSScriptRoot 'launcher.py') $mode
         if ($LASTEXITCODE -ne 0) { throw 'Application launcher failed. See .runtime\logs\launcher.log.' }
     }
@@ -364,6 +273,7 @@ catch {
     exit 1
 }
 finally {
+    Remove-Item Env:MANGO_BOOTSTRAP_LOCK_HELD -ErrorAction SilentlyContinue
     if ($lockHeld) { $Lock.Unlock(0,1) }
     $Lock.Dispose()
 }
