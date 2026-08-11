@@ -20,7 +20,11 @@ Add-Content $Pth.FullName ".." -Encoding ASCII
 $GetPip = Join-Path $Cache "get-pip.py"
 Invoke-WebRequest "https://bootstrap.pypa.io/pip/3.12/get-pip.py" -OutFile $GetPip
 & (Join-Path $Runtime "python.exe") $GetPip "pip==24.3.1" --no-warn-script-location
+if ($LASTEXITCODE -ne 0) { throw "pip bootstrap failed with exit code $LASTEXITCODE" }
 & (Join-Path $Runtime "python.exe") -m pip install --no-compile --requirement (Join-Path $Root "requirements\runtime.txt")
+if ($LASTEXITCODE -ne 0) { throw "Runtime dependency installation failed with exit code $LASTEXITCODE" }
+& (Join-Path $Runtime "python.exe") -c "import PySide6; import requests"
+if ($LASTEXITCODE -ne 0) { throw "Runtime dependency import check failed with exit code $LASTEXITCODE" }
 
 Copy-Item (Join-Path $Root "app") $Package -Recurse
 Copy-Item (Join-Path $Root "Start.bat") $Package
