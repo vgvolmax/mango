@@ -19,7 +19,7 @@ $functionAst = $ast.Find(
 if ($null -eq $functionAst) { throw 'Set-ApplicationPythonPaths was not found.' }
 Invoke-Expression $functionAst.Extent.Text
 
-$script:PythonDir = Join-Path ([IO.Path]::GetTempPath()) ("mango-pth-test-{0}" -f [Guid]::NewGuid().ToString('N'))
+$script:PythonDir = Join-Path ([IO.Path]::GetTempPath()) ("MANGO path тест-{0}" -f [Guid]::NewGuid().ToString('N'))
 [IO.Directory]::CreateDirectory($script:PythonDir) | Out-Null
 $path = Join-Path $script:PythonDir 'python313._pth'
 $canonical = "python313.zip`r`n.`r`n..\pip`r`n..\site-packages`r`n..\..`r`n"
@@ -38,6 +38,11 @@ try {
     if (Get-ChildItem -LiteralPath $script:PythonDir -Filter 'python313._pth.backup-*') {
         throw 'Successful replacement left its backup file behind.'
     }
+
+    # An already canonical file remains intact and does not leave publication artifacts.
+    Set-ApplicationPythonPaths
+    if ([IO.File]::ReadAllText($path) -cne $canonical) { throw 'Canonical path file was changed.' }
+    if ([IO.File]::Exists("$path.new")) { throw 'Canonical path validation left its temporary file behind.' }
 }
 finally {
     Remove-Item -LiteralPath $script:PythonDir -Recurse -Force -ErrorAction SilentlyContinue

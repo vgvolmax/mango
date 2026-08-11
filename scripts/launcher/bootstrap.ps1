@@ -291,7 +291,7 @@ function Set-ApplicationPythonPaths {
         if ([IO.File]::Exists($path)) {
             $backup = "$path.backup-$PID-$([Guid]::NewGuid().ToString('N'))"
             [IO.File]::Replace($temporary, $path, $backup)
-            Remove-Item -LiteralPath $backup -Force
+            [IO.File]::Delete($backup)
         }
         else { [IO.File]::Move($temporary, $path) }
     }
