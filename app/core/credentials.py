@@ -16,7 +16,7 @@ class ProtectionBackend(Protocol):
 
 
 class _Blob(ctypes.Structure):
-    _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_byte))]
+    _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(wintypes.BYTE))]
 
 
 class WindowsDpapiBackend:
@@ -24,24 +24,48 @@ class WindowsDpapiBackend:
         if os.name != "nt":
             raise OSError("DPAPI is available only on Windows")
 
+        self._crypt32 = ctypes.WinDLL("Crypt32.dll", use_last_error=True)
+        self._kernel32 = ctypes.WinDLL("Kernel32.dll", use_last_error=True)
+
+        blob_pointer = ctypes.POINTER(_Blob)
+        self._crypt32.CryptProtectData.argtypes = [
+            blob_pointer,
+            wintypes.LPCWSTR,
+            blob_pointer,
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            wintypes.DWORD,
+            blob_pointer,
+        ]
+        self._crypt32.CryptProtectData.restype = wintypes.BOOL
+        self._crypt32.CryptUnprotectData.argtypes = [
+            blob_pointer,
+            ctypes.POINTER(wintypes.LPWSTR),
+            blob_pointer,
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            wintypes.DWORD,
+            blob_pointer,
+        ]
+        self._crypt32.CryptUnprotectData.restype = wintypes.BOOL
+        self._kernel32.LocalFree.argtypes = [wintypes.HLOCAL]
+        self._kernel32.LocalFree.restype = wintypes.HLOCAL
+
     @staticmethod
     def _blob(data: bytes) -> tuple[_Blob, object]:
         buffer = ctypes.create_string_buffer(data)
-        return _Blob(len(data), ctypes.cast(buffer, ctypes.POINTER(ctypes.c_byte))), buffer
+        return _Blob(len(data), ctypes.cast(buffer, ctypes.POINTER(wintypes.BYTE))), buffer
 
     def _convert(self, data: bytes, operation: str) -> bytes:
         source, buffer = self._blob(data)
         target = _Blob()
-        function = getattr(ctypes.windll.crypt32, operation)
+        function = getattr(self._crypt32, operation)
         if not function(ctypes.byref(source), None, None, None, None, 0, ctypes.byref(target)):
-            raise ctypes.WinError()
+            raise ctypes.WinError(ctypes.get_last_error())
         try:
             return ctypes.string_at(target.pbData, target.cbData)
         finally:
-            local_free = ctypes.windll.kernel32.LocalFree
-            local_free.argtypes = [ctypes.c_void_p]
-            local_free.restype = ctypes.c_void_p
-            local_free(target.pbData)
+            self._kernel32.LocalFree(ctypes.cast(target.pbData, wintypes.HLOCAL))
 
     def protect(self, data: bytes) -> bytes:
         return self._convert(data, "CryptProtectData")
