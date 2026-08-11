@@ -61,8 +61,9 @@ function Invoke-StreamingDownload([Uri]$InitialUri, [string]$Destination, [strin
     $handler = New-Object System.Net.Http.HttpClientHandler
     $handler.AllowAutoRedirect = $false
     $client = New-Object System.Net.Http.HttpClient($handler)
+    $client.Timeout = [TimeSpan]::FromSeconds(60)
     $cancellation = New-Object System.Threading.CancellationTokenSource
-    $cancellation.CancelAfter([TimeSpan]::FromMinutes(10))
+    $cancellation.CancelAfter([TimeSpan]::FromMinutes(5))
     try {
         $uri = $InitialUri
         for ($redirects = 0; $redirects -le 10; $redirects++) {
@@ -98,7 +99,12 @@ function Invoke-StreamingDownload([Uri]$InitialUri, [string]$Destination, [strin
                     )
                     $buffer = New-Object byte[] (256 * 1024)
                     [long]$received = 0
-                    while (($count = $input.Read($buffer, 0, $buffer.Length)) -gt 0) {
+                    while (($count = $input.ReadAsync(
+                        $buffer,
+                        0,
+                        $buffer.Length,
+                        $cancellation.Token
+                    ).GetAwaiter().GetResult()) -gt 0) {
                         $output.Write($buffer, 0, $count)
                         $received += $count
                     }
