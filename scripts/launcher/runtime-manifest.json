@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "python": {
+    "version": "3.12.8",
+    "url": "https://www.python.org/ftp/python/3.12.8/python-3.12.8-embed-amd64.zip",
+    "sha256": "f9a6b5e2f4459f5c15e2a58001aa1a9f135f38f69729fb841d730e263a45ea4f"
+  },
+  "pip": {
+    "version": "24.3.1",
+    "url": "https://bootstrap.pypa.io/pip/24.3/pip.pyz",
+    "sha256": "27866666111b7a0d4d9c53a9b525ddb7abade1f23b5b43a244b95be5c4c7534a"
+  }
+}

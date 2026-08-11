@@ -1,11 +1,14 @@
 @echo off
-setlocal
-set "APP_ROOT=%~dp0"
-set "MANGO_APP_ROOT=%APP_ROOT%"
-if not exist "%APP_ROOT%runtime\pythonw.exe" (
-  echo Portable runtime not found. Download a release package or run Build-Portable.bat as a developer.
-  pause
-  exit /b 1
+setlocal EnableExtensions DisableDelayedExpansion
+cd /d "%~dp0"
+
+powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%~dp0scripts\launcher\bootstrap.ps1" %*
+set "RC=%ERRORLEVEL%"
+
+if not "%RC%"=="0" (
+  echo.
+  echo MANGO Downloader could not start.
+  echo Log: "%~dp0logs\launcher.log"
+  if not defined CI pause
 )
-start "" /D "%APP_ROOT%" "%APP_ROOT%runtime\pythonw.exe" -m app.main
-endlocal
+exit /b %RC%

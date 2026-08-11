@@ -10,7 +10,8 @@ $Dist = Join-Path $Root "dist"
 $Package = Join-Path $Dist "MangoDownloader"
 $Cache = Join-Path $Root "build"
 $PythonZip = Join-Path $Cache "python-$PythonVersion-embed-amd64.zip"
-$PythonUrl = "https://www.python.org/ftp/python/$PythonVersion/python-$PythonVersion-embed-amd64.zip"
+$Manifest = Get-Content (Join-Path $Root "scripts\launcher\runtime-manifest.json") -Raw | ConvertFrom-Json
+$PythonUrl = $Manifest.python.url
 $BuildPythonError = "Python 3.12 with pip is required to build the portable package."
 
 # Validate the build interpreter before downloading or modifying build output.
@@ -34,6 +35,9 @@ if (!(Test-Path $PythonZip)) {
 }
 if (!(Test-Path $PythonZip) -or (Get-Item $PythonZip).Length -eq 0) {
     throw "Embedded Python download is missing or empty: $PythonZip"
+}
+if ((Get-FileHash $PythonZip -Algorithm SHA256).Hash.ToLowerInvariant() -ne $Manifest.python.sha256) {
+    throw "Embedded Python SHA-256 verification failed"
 }
 
 $Runtime = Join-Path $Package "runtime"
@@ -68,12 +72,23 @@ if (!(($PthLines | ForEach-Object { $_.Trim() }) -contains "import site")) {
 $PthLines | Set-Content $Pth.FullName -Encoding ASCII
 
 Write-Host "Installing runtime dependencies..."
-& $BuildPython -m pip install --disable-pip-version-check --no-compile --target $SitePackages -r (Join-Path $Root "requirements\runtime.txt")
+& $BuildPython -m pip install --disable-pip-version-check --only-binary=:all: --no-cache-dir --no-compile --target $SitePackages -r (Join-Path $Root "requirements\runtime-win-x64.lock.txt")
 if ($LASTEXITCODE -ne 0) { throw "Runtime dependency installation failed with exit code $LASTEXITCODE" }
 
 Copy-Item (Join-Path $Root "app") $Package -Recurse
 Copy-Item (Join-Path $Root "Start.bat") $Package
+Copy-Item (Join-Path $Root "scripts") $Package -Recurse
+Copy-Item (Join-Path $Root "requirements") $Package -Recurse
 New-Item (Join-Path $Package "data"), (Join-Path $Package "logs"), (Join-Path $Package "downloads") -ItemType Directory | Out-Null
+
+$State = [ordered]@{
+    schema_version = 1
+    python_version = $Manifest.python.version
+    python_archive_sha256 = $Manifest.python.sha256
+    requirements_sha256 = (Get-FileHash (Join-Path $Root "requirements\runtime-win-x64.lock.txt") -Algorithm SHA256).Hash.ToLowerInvariant()
+    launcher_contract_version = 1
+}
+$State | ConvertTo-Json | Set-Content (Join-Path $Runtime "install-state.json") -Encoding UTF8
 
 Write-Host "Validating embedded runtime imports..."
 $EmbeddedPython = Join-Path $Runtime "python.exe"

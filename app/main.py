@@ -15,9 +15,22 @@ from app.ui.main_window import MainWindow
 
 
 def main() -> int:
-    paths = AppPaths.discover()
-    created = paths.ensure_directories()
-    logger = configure_logging(paths.log_file)
+    app = QApplication(sys.argv)
+    app.setApplicationName("MANGO Downloader")
+    try:
+        paths = AppPaths.discover()
+        created = paths.ensure_directories()
+        logger = configure_logging(paths.log_file)
+    except Exception as error:
+        QMessageBox.critical(
+            None,
+            "MANGO Downloader",
+            "Не удалось подготовить рабочую папку приложения.\n\n"
+            "Переместите распакованную папку в Рабочий стол, Документы или Загрузки "
+            "и повторите запуск. Права администратора не нужны.\n\n"
+            f"Ошибка: {error}",
+        )
+        return 1
 
     def handle_exception(exc_type, exc_value, traceback) -> None:  # type: ignore[no-untyped-def]
         logger.critical("Unhandled exception", exc_info=(exc_type, exc_value, traceback))
@@ -33,8 +46,6 @@ def main() -> int:
     for directory in created:
         logger.info("Created working directory: %s", directory)
 
-    app = QApplication(sys.argv)
-    app.setApplicationName("MANGO Downloader")
     try:
         settings = SettingsStore(paths.settings_file, logger)
         settings.load()

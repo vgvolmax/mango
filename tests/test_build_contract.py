@@ -18,7 +18,9 @@ def test_build_python_installs_only_runtime_requirements_into_site_packages():
     assert "bootstrap.pypa.io" not in script
     assert "& $BuildPython -m pip install" in script
     assert "--target $SitePackages" in script
-    assert 'requirements\\runtime.txt' in script
+    assert 'requirements\\runtime-win-x64.lock.txt' in script
+    assert "--only-binary=:all:" in script
+    assert "--no-cache-dir" in script
     assert '"Lib\\site-packages"' in script
     assert "requirements\\dev.txt" not in script
 
