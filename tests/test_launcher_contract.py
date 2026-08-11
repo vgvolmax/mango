@@ -5,6 +5,9 @@ from pathlib import Path
 ROOT = Path(__file__).parents[1]
 START = (ROOT / "Start.bat").read_text(encoding="utf-8")
 BOOTSTRAP = (ROOT / "scripts/launcher/bootstrap.ps1").read_text(encoding="utf-8")
+HASH_HELPER = (ROOT / "scripts/launcher/hash.ps1").read_text(encoding="utf-8")
+BUILD_SCRIPT = (ROOT / "scripts/build_portable.ps1").read_text(encoding="utf-8")
+WINDOWS_CI = (ROOT / ".github/workflows/windows-ci.yml").read_text(encoding="utf-8")
 
 
 def test_batch_is_thin_root_relative_entry_point():
@@ -48,11 +51,32 @@ def test_manifest_is_exact_and_pinned():
     assert set(manifest) == {"schema_version", "python", "pip"}
     assert manifest["schema_version"] == 1
     assert manifest["python"]["version"] == "3.12.8"
+    assert manifest["pip"]["version"] == "24.3.1"
+    assert manifest["pip"]["url"] == (
+        "https://bootstrap.pypa.io/pip/zipapp/pip-24.3.1.pyz"
+    )
     for artifact in (manifest["python"], manifest["pip"]):
         assert set(artifact) == {"version", "url", "sha256"}
         assert artifact["url"].startswith("https://")
         assert re.fullmatch(r"[0-9a-f]{64}", artifact["sha256"])
         assert "latest" not in artifact["url"]
+
+
+def test_launcher_build_and_ci_use_compatible_dotnet_hashing():
+    production = START + BOOTSTRAP + HASH_HELPER + BUILD_SCRIPT + WINDOWS_CI
+    assert "get-filehash" not in production.lower()
+    for api in (
+        "System.Security.Cryptography.SHA256",
+        "System.IO.File",
+        "OpenRead",
+        "ComputeHash",
+        "Dispose",
+    ):
+        assert api in HASH_HELPER
+    assert "ToLowerInvariant" in HASH_HELPER
+    assert 'launcher\\hash.ps1' in BUILD_SCRIPT
+    assert 'Join-Path $PSScriptRoot "hash.ps1"' in BOOTSTRAP
+    assert "scripts\\launcher\\hash.ps1" in WINDOWS_CI
 
 
 def test_dependency_lock_is_complete_and_exact():

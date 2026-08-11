@@ -7,7 +7,7 @@
   },
   "pip": {
     "version": "24.3.1",
-    "url": "https://bootstrap.pypa.io/pip/24.3/pip.pyz",
+    "url": "https://bootstrap.pypa.io/pip/zipapp/pip-24.3.1.pyz",
     "sha256": "27866666111b7a0d4d9c53a9b525ddb7abade1f23b5b43a244b95be5c4c7534a"
   }
 }
