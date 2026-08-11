@@ -14,3 +14,83 @@ jobs:
         run: python -m pytest -v
       - name: compileall
         run: python -m compileall -q app tests
+      - name: Python bootstrap parity acceptance
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $source = 'C:\CI Work\Тест MANGO\Mango Downloader'
+          if (Test-Path 'C:\CI Work') { Remove-Item 'C:\CI Work' -Recurse -Force }
+          New-Item -ItemType Directory -Path $source | Out-Null
+          Copy-Item "$env:GITHUB_WORKSPACE\*" $source -Recurse -Force
+          Set-Location $source
+          Remove-Item '.runtime' -Recurse -Force -ErrorAction SilentlyContinue
+
+          $env:PATH = @(
+            "$env:SystemRoot\System32"
+            "$env:SystemRoot"
+            "$env:SystemRoot\System32\WindowsPowerShell\v1.0"
+          ) -join ';'
+          if (Get-Command python -ErrorAction SilentlyContinue) {
+            throw 'System Python remains visible'
+          }
+
+          & cmd.exe /d /c 'Start.bat --runtime-smoke'
+          if ($LASTEXITCODE -ne 0) { throw 'First runtime smoke failed' }
+
+          $required = @(
+            '.runtime/python/python.exe'
+            '.runtime/python/pythonw.exe'
+            '.runtime/python/python3.dll'
+            '.runtime/python/python313.dll'
+            '.runtime/python/install-receipt.json'
+            '.runtime/downloads/python.zip'
+            '.runtime/launcher.lock'
+          )
+          foreach ($path in $required) {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+              throw "Bootstrap output is missing: $path"
+            }
+          }
+          & '.runtime/python/python.exe' -c "import platform; assert platform.python_version() == '3.13.7'"
+          if ($LASTEXITCODE -ne 0) { throw 'Installed Python version validation failed' }
+
+          $receipt = Get-Content '.runtime/python/install-receipt.json' -Raw | ConvertFrom-Json
+          if ($receipt.schema_version -ne 1 -or
+              $receipt.version -cne '3.13.7' -or
+              $receipt.sha256 -cne 'f6cca216a359be84797cabb54149ce5e062afb16cc7567eb7fc51cacb2d86b65') {
+            throw 'Install receipt does not match the runtime manifest'
+          }
+
+          $manifestPath = 'scripts/launcher/runtime-manifest.json'
+          $manifestOriginal = Get-Content $manifestPath -Raw
+          $receiptBefore = Get-FileHash '.runtime/python/install-receipt.json'
+          $pythonTimeBefore = (Get-Item '.runtime/python/python.exe').LastWriteTimeUtc
+          $archiveTimeBefore = (Get-Item '.runtime/downloads/python.zip').LastWriteTimeUtc
+          $manifest = $manifestOriginal | ConvertFrom-Json
+          $manifest.download_hosts = @('bootstrap-must-not-download.invalid')
+          $manifest | ConvertTo-Json -Depth 8 | Set-Content $manifestPath -Encoding UTF8
+          $env:HTTP_PROXY = 'http://127.0.0.1:9'
+          $env:HTTPS_PROXY = 'http://127.0.0.1:9'
+
+          & cmd.exe /d /c 'Start.bat --runtime-smoke'
+          if ($LASTEXITCODE -ne 0) { throw 'Offline reuse runtime smoke failed' }
+          $receiptAfter = Get-FileHash '.runtime/python/install-receipt.json'
+          if ($receiptAfter.Hash -cne $receiptBefore.Hash -or
+              (Get-Item '.runtime/python/python.exe').LastWriteTimeUtc -ne $pythonTimeBefore -or
+              (Get-Item '.runtime/downloads/python.zip').LastWriteTimeUtc -ne $archiveTimeBefore) {
+            throw 'Existing runtime or archive changed during offline reuse'
+          }
+
+          $manifestOriginal | Set-Content $manifestPath -Encoding UTF8 -NoNewline
+          Remove-Item Env:HTTP_PROXY, Env:HTTPS_PROXY -ErrorAction SilentlyContinue
+          '{"schema_version":0}' | Set-Content '.runtime/python/install-receipt.json' -Encoding UTF8
+          & cmd.exe /d /c 'Start.bat --runtime-smoke'
+          if ($LASTEXITCODE -ne 0) { throw 'Invalid receipt repair failed' }
+          $repaired = Get-Content '.runtime/python/install-receipt.json' -Raw | ConvertFrom-Json
+          if ($repaired.schema_version -ne 1 -or
+              $repaired.version -cne '3.13.7' -or
+              $repaired.sha256 -cne 'f6cca216a359be84797cabb54149ce5e062afb16cc7567eb7fc51cacb2d86b65') {
+            throw 'Repair did not restore the expected receipt'
+          }
+          & '.runtime/python/python.exe' -c "import platform; assert platform.python_version() == '3.13.7'"
+          if ($LASTEXITCODE -ne 0) { throw 'Repaired Python validation failed' }

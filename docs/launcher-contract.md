@@ -34,6 +34,8 @@ Start.bat
 
 PR1 must port the working Auto Offer Python bootstrap mechanics with minimal changes.
 
+PR1 owns only Start.bat → bootstrap.ps1 → .runtime/python.
+
 Do not redesign:
 
 - OS-backed lock
