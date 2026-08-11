@@ -288,7 +288,12 @@ function Set-ApplicationPythonPaths {
     [IO.File]::WriteAllText($temporary, $canonical, [Text.UTF8Encoding]::new($false))
     if ([IO.File]::ReadAllText($temporary) -cne $canonical) { throw 'Embedded Python path validation failed.' }
     if (-not [IO.File]::Exists($path) -or [IO.File]::ReadAllText($path) -cne $canonical) {
-        [IO.File]::Replace($temporary, $path, $null)
+        if ([IO.File]::Exists($path)) {
+            $backup = "$path.backup-$PID-$([Guid]::NewGuid().ToString('N'))"
+            [IO.File]::Replace($temporary, $path, $backup)
+            Remove-Item -LiteralPath $backup -Force
+        }
+        else { [IO.File]::Move($temporary, $path) }
     }
     else { Remove-Item -LiteralPath $temporary -Force }
 }
