@@ -57,7 +57,7 @@ class WindowsDpapiBackend:
         return _Blob(len(data), ctypes.cast(buffer, ctypes.POINTER(wintypes.BYTE))), buffer
 
     def _convert(self, data: bytes, operation: str) -> bytes:
-        source, buffer = self._blob(data)
+        source, _input_buffer = self._blob(data)
         target = _Blob()
         function = getattr(self._crypt32, operation)
         if not function(ctypes.byref(source), None, None, None, None, 0, ctypes.byref(target)):
@@ -65,7 +65,8 @@ class WindowsDpapiBackend:
         try:
             return ctypes.string_at(target.pbData, target.cbData)
         finally:
-            self._kernel32.LocalFree(ctypes.cast(target.pbData, wintypes.HLOCAL))
+            # Pass LocalFree the address returned by DPAPI as a pointer-sized value.
+            self._kernel32.LocalFree(ctypes.cast(target.pbData, ctypes.c_void_p))
 
     def protect(self, data: bytes) -> bytes:
         return self._convert(data, "CryptProtectData")
