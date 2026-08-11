@@ -40,7 +40,7 @@ def test_python_manifest_matches_auto_offer_reference():
     }
 
 
-def test_pr1_contains_no_mango_dependency_bootstrap():
+def test_bootstrap_forbids_unsafe_or_competing_installers():
     paths = [
         ROOT / "Start.bat",
         ROOT / "scripts/launcher/bootstrap.ps1",
@@ -52,11 +52,9 @@ def test_pr1_contains_no_mango_dependency_bootstrap():
         "pip.pyz",
         "get-pip.py",
         "ensurepip",
-        "pyside6",
-        "requests",
-        "site-packages",
-        "app.main",
-        "launcher.py",
+        "bootstrap.pypa.io",
+        "invoke-webrequest",
+        "get-filehash",
     ):
         assert forbidden not in text
 

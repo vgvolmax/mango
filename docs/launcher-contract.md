@@ -34,7 +34,8 @@ Start.bat
 
 PR1 must port the working Auto Offer Python bootstrap mechanics with minimal changes.
 
-PR1 owns only Start.bat → bootstrap.ps1 → .runtime/python.
+The frozen PR1 layer owns Start.bat → bootstrap.ps1 → .runtime/python. Its
+`--runtime-smoke` mode stops after validating Python.
 
 Do not redesign:
 
@@ -54,7 +55,12 @@ Any deviation from Auto Offer must be explicitly justified in the PR description
 
 ## Mango-specific layer
 
-Mango-specific dependency installation and GUI launch belong to PR2, not PR1.
+PowerShell then prepares the pinned pip wheel, writes the controlled embedded
+Python search paths, and hands off under the same OS lock to `launcher.py`.
+The Python launcher installs the fully pinned binary-only dependency graph into a
+staging directory, validates it, publishes it atomically, and records its state.
+`--smoke` constructs and closes the GUI offscreen; normal launch spawns
+`.runtime/python/pythonw.exe -m app.main`.
 
 ## Forbidden competing architecture
 
