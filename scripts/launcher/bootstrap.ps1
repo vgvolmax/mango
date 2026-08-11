@@ -237,14 +237,12 @@ try {
     }
 
     $manifest = Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json
-    if ([int]$manifest.schema_version -ne 1 -or $null -eq $manifest.python -or $null -eq $manifest.pip -or
+    if ([int]$manifest.schema_version -ne 1 -or $null -eq $manifest.python -or
+        $null -eq $manifest.download_hosts -or @($manifest.download_hosts).Count -eq 0 -or
         [string]::IsNullOrWhiteSpace([string]$manifest.python.version) -or
         [string]::IsNullOrWhiteSpace([string]$manifest.python.url) -or
         [string]$manifest.python.sha256 -notmatch '^[0-9a-f]{64}$' -or
-        [string]$manifest.python.executable -cne 'python.exe' -or
-        [string]::IsNullOrWhiteSpace([string]$manifest.pip.version) -or
-        [string]::IsNullOrWhiteSpace([string]$manifest.pip.url) -or
-        [string]$manifest.pip.sha256 -notmatch '^[0-9a-f]{64}$') {
+        [string]$manifest.python.executable -cne 'python.exe') {
         throw 'Invalid runtime manifest.'
     }
 

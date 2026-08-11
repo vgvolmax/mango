@@ -14,6 +14,7 @@ import subprocess
 import sys
 import uuid
 import zipfile
+from typing import NamedTuple
 
 LAUNCHER_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(LAUNCHER_DIR))
@@ -30,6 +31,12 @@ LOG_PATH = RUNTIME / "logs" / "launcher.log"
 PIP_RUNNER = Path(__file__).with_name("pip_runner.py")
 RUN_APP = Path(__file__).with_name("run_app.py")
 PIN = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)==([A-Za-z0-9][A-Za-z0-9.!+_-]*)$")
+HASH = re.compile(r"^--hash=sha256:([0-9a-f]{64})$")
+
+
+class HashedLock(NamedTuple):
+    pins: dict[str, str]
+    hashes: dict[str, tuple[str, ...]]
 
 
 def configure_logger() -> logging.Logger:
@@ -61,22 +68,56 @@ def load_manifest() -> dict[str, object]:
     return manifest
 
 
-def parse_lock_file(path: Path = REQUIREMENTS) -> dict[str, str]:
+def parse_lock_file(path: Path = REQUIREMENTS) -> HashedLock:
     pins: dict[str, str] = {}
-    for number, raw in enumerate(path.read_text(encoding="utf-8-sig").splitlines(), 1):
-        if not raw:
+    hashes: dict[str, tuple[str, ...]] = {}
+    physical_lines = path.read_text(encoding="utf-8-sig").splitlines()
+    logical: list[tuple[int, list[str]]] = []
+    parts: list[str] = []
+    start = 0
+    for number, raw in enumerate(physical_lines, 1):
+        if not raw.strip():
+            if parts:
+                raise ValueError(f"Invalid requirement at line {start}: incomplete continuation")
             continue
-        match = PIN.fullmatch(raw)
+        if not parts:
+            start = number
+        stripped = raw.strip()
+        continued = stripped.endswith("\\")
+        token = stripped[:-1].rstrip() if continued else stripped
+        if not token:
+            raise ValueError(f"Invalid requirement at line {number}")
+        parts.append(token)
+        if not continued:
+            logical.append((start, parts))
+            parts = []
+    if parts:
+        raise ValueError(f"Invalid requirement at line {start}: incomplete continuation")
+
+    for number, tokens in logical:
+        match = PIN.fullmatch(tokens[0])
         if not match:
             raise ValueError(f"Invalid requirement at line {number}: exact name==version pins only")
         name, version = match.groups()
         normalized = name.casefold().replace("_", "-").replace(".", "-")
         if normalized in pins:
             raise ValueError(f"Duplicate requirement at line {number}: {name}")
+        requirement_hashes: list[str] = []
+        for token in tokens[1:]:
+            hash_match = HASH.fullmatch(token)
+            if not hash_match:
+                raise ValueError(f"Invalid requirement hash at line {number}")
+            digest = hash_match.group(1)
+            if digest in requirement_hashes:
+                raise ValueError(f"Duplicate requirement hash at line {number}: {name}")
+            requirement_hashes.append(digest)
+        if not requirement_hashes:
+            raise ValueError(f"Requirement at line {number} has no SHA256 hash: {name}")
         pins[normalized] = version
+        hashes[normalized] = tuple(requirement_hashes)
     if not {"pyside6", "requests"}.issubset(pins):
         raise ValueError("Runtime lock must pin PySide6 and requests")
-    return pins
+    return HashedLock(pins, hashes)
 
 
 def _hash(path: Path) -> str:
@@ -213,9 +254,10 @@ def prepare_dependencies(manifest: dict[str, object], pins: dict[str, str], logg
     staging.mkdir(parents=True)
     try:
         command = [
-            sys.executable, str(PIP_RUNNER), str(PIP_DIR), "install",
+            sys.executable, str(PIP_RUNNER), str(PIP_DIR), "--isolated", "install",
             "--disable-pip-version-check", "--no-input", "--no-cache-dir",
-            "--no-compile", "--only-binary=:all:", "--target", str(staging),
+            "--no-compile", "--require-hashes", "--no-deps",
+            "--only-binary=:all:", "--target", str(staging),
             "-r", str(REQUIREMENTS),
         ]
         subprocess.run(command, cwd=ROOT, shell=False, check=True)
@@ -249,9 +291,9 @@ def main() -> int:
         if os.environ.get("MANGO_BOOTSTRAP_LOCK_HELD") != "1":
             raise RuntimeError("launcher mutations must run under bootstrap lock")
         manifest = load_manifest()
-        pins = parse_lock_file()
+        lock = parse_lock_file()
         prepare_pip(manifest, logger)
-        prepare_dependencies(manifest, pins, logger)
+        prepare_dependencies(manifest, lock.pins, logger)
         mode = sys.argv[1] if len(sys.argv) > 1 else "start"
         return launch(mode, logger)
     except Exception:

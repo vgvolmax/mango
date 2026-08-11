@@ -51,6 +51,16 @@ jobs:
               throw "Bootstrap output is missing: $path"
             }
           }
+
+          $manifestPath = 'scripts/launcher/runtime-manifest.json'
+          $manifestOriginal = Get-Content $manifestPath -Raw
+          $pythonOnlyManifest = $manifestOriginal | ConvertFrom-Json
+          $pythonOnlyManifest.PSObject.Properties.Remove('pip')
+          $pythonOnlyManifest | ConvertTo-Json -Depth 8 | Set-Content $manifestPath -Encoding UTF8
+          & cmd.exe /d /c 'Start.bat --runtime-smoke'
+          if ($LASTEXITCODE -ne 0) { throw 'Python bootstrap incorrectly requires the pip manifest' }
+          $manifestOriginal | Set-Content $manifestPath -Encoding UTF8 -NoNewline
+
           & '.runtime/python/python.exe' -c "import platform; assert platform.python_version() == '3.13.7'"
           if ($LASTEXITCODE -ne 0) { throw 'Installed Python version validation failed' }
 
@@ -61,8 +71,6 @@ jobs:
             throw 'Install receipt does not match the runtime manifest'
           }
 
-          $manifestPath = 'scripts/launcher/runtime-manifest.json'
-          $manifestOriginal = Get-Content $manifestPath -Raw
           $receiptBefore = Get-FileHash '.runtime/python/install-receipt.json'
           $pythonTimeBefore = (Get-Item '.runtime/python/python.exe').LastWriteTimeUtc
           $archiveTimeBefore = (Get-Item '.runtime/downloads/python.zip').LastWriteTimeUtc
@@ -104,9 +112,13 @@ jobs:
           $env:PATH = @("$env:SystemRoot\System32", "$env:SystemRoot", "$env:SystemRoot\System32\WindowsPowerShell\v1.0") -join ';'
           if (Get-Command python -ErrorAction SilentlyContinue) { throw 'System Python remains visible' }
 
+          $env:PIP_INDEX_URL = 'https://bootstrap-must-ignore.invalid/simple'
+          $env:PIP_EXTRA_INDEX_URL = 'https://bootstrap-must-ignore.invalid/simple'
+          $env:PIP_REQUIRE_VIRTUALENV = '1'
           Set-Location 'C:\Windows\Temp'
           & cmd.exe /d /c ('"' + (Join-Path $source 'Start.bat') + '" --smoke')
           if ($LASTEXITCODE -ne 0) { throw 'Full first-run smoke failed' }
+          Remove-Item Env:PIP_INDEX_URL, Env:PIP_EXTRA_INDEX_URL, Env:PIP_REQUIRE_VIRTUALENV -ErrorAction SilentlyContinue
           Set-Location $source
           $required = @(
             '.runtime/python/python.exe', '.runtime/python/pythonw.exe',

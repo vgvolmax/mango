@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+from scripts.launcher.launcher import parse_lock_file
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -20,16 +22,23 @@ def test_manifest_pins_production_pip_wheel():
     assert "get-pip.py" not in all_launcher_text
 
 
-def test_runtime_lock_is_complete_and_exact():
-    lines = [line for line in (ROOT / "requirements/runtime-win-x64.lock.txt").read_text().splitlines() if line]
-    assert len(lines) == 9
-    assert all(line.count("==") == 1 for line in lines)
+def test_runtime_hashed_lock_is_complete_and_exact():
+    lock = parse_lock_file(ROOT / "requirements/runtime-win-x64.lock.txt")
+    expected = {
+        "pyside6", "pyside6-addons", "pyside6-essentials", "shiboken6",
+        "requests", "certifi", "charset-normalizer", "idna", "urllib3",
+    }
+    assert set(lock.pins) == expected
+    assert set(lock.hashes) == expected
+    assert len(lock.pins) == len(lock.hashes) == 9
+    assert all(values and all(len(value) == 64 for value in values) for values in lock.hashes.values())
 
 
 def test_launcher_stages_validates_receipt_and_spawns_gui():
     text = (ROOT / "scripts/launcher/launcher.py").read_text(encoding="utf-8")
-    for token in ("--only-binary=:all:", "site-packages.new-", "dependencies-receipt.json", "distributions(path=", "pythonw.exe", "RUN_APP", "subprocess.Popen", "shell=False"):
+    for token in ("--isolated", "--require-hashes", "--no-deps", "--only-binary=:all:", "site-packages.new-", "dependencies-receipt.json", "distributions(path=", "pythonw.exe", "RUN_APP", "subprocess.Popen", "shell=False"):
         assert token in text
+    assert 'str(PIP_DIR), "--isolated", "install"' in text
     assert "PYTHONPATH" not in text
 
 
