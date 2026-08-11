@@ -15,8 +15,11 @@ jobs:
       - name: compileall
         run: python -m compileall -q app tests
       - name: Build portable package
-        shell: cmd
-        run: Build-Portable.bat
+        shell: pwsh
+        run: |
+          $buildPython = (Get-Command python).Source
+          & .\Build-Portable.bat $buildPython
+          if ($LASTEXITCODE -ne 0) { throw "Portable build failed" }
       - name: Validate portable ZIP
         shell: pwsh
         run: |
@@ -38,7 +41,8 @@ jobs:
         shell: pwsh
         run: |
           $env:MANGO_APP_ROOT = (Resolve-Path dist/smoke).Path
-          & dist/smoke/runtime/python.exe -c "import app; import app.main; import PySide6; import requests; assert app.__version__ == '0.2.0'"
+          $runtime = (Resolve-Path dist/smoke/runtime).Path
+          & dist/smoke/runtime/python.exe -c "import sys; from pathlib import Path; import app; import app.main; import PySide6; import requests; runtime = Path(r'$runtime').resolve(); site_packages = (runtime / 'Lib' / 'site-packages').resolve(); assert app.__version__ == '0.2.0'; assert Path(sys.executable).resolve().parent == runtime; assert site_packages in [Path(p).resolve() for p in sys.path if p]; print(sys.executable)"
           if ($LASTEXITCODE -ne 0) { throw "Embedded runtime smoke-test failed" }
           & dist/smoke/runtime/python.exe -c "import os; from pathlib import Path; from app.core.paths import AppPaths; assert AppPaths.discover().root == Path(os.environ['MANGO_APP_ROOT'])"
           if ($LASTEXITCODE -ne 0) { throw "Portable runtime root smoke-test failed" }

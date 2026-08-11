@@ -22,6 +22,10 @@ Portable desktop-приложение для Windows 10/11 x64. Пользова
 6. Отметьте звонки с записями.
 7. Выберите папку и нажмите «Скачать выбранные».
 
-## Разработка и portable-сборка
+## Для пользователя
 
-Требуется Python 3.12 x64. Установите `requirements/dev.txt`, затем запускайте `python -m app.main` или `pytest`. На Windows `Build-Portable.bat` создаёт `dist/MangoDownloader-portable.zip` с embedded Python, PySide6 и requests. Рабочие данные находятся рядом с приложением: настройки и защищённые credentials — в `data/`, журнал — в `logs/`, записи по умолчанию — в `downloads/`.
+Python, pip и доступ к интернету для запуска не нужны. Полностью распакуйте portable ZIP и запустите `Start.bat`. Рабочие данные находятся рядом с приложением: настройки и защищённые credentials — в `data/`, журнал — в `logs/`, записи по умолчанию — в `downloads/`.
+
+## Для разработки и сборки
+
+Нужен Python 3.12 x64 с pip. Установите `requirements/dev.txt`, затем запускайте `python -m app.main` или `python -m pytest`. На Windows `Build-Portable.bat` создаёт `dist/MangoDownloader-portable.zip` с Python Embedded, PySide6 и requests. Системный Python используется только при сборке; зависимости приложения устанавливаются в portable runtime из `requirements/runtime.txt`.
