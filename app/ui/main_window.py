@@ -1,8 +1,10 @@
 """Responsive Qt user interface for calls and downloads."""
 
 from datetime import datetime, time
+from dataclasses import dataclass
 import logging
 from pathlib import Path
+import traceback
 
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, Qt, Signal, Slot
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QDateEdit, QFileDialog, QFormLayout,
@@ -16,6 +18,14 @@ from app.core.settings import SettingsStore
 from app.mango.client import MangoClient
 from app.services.calls import CallService
 from app.services.downloads import DownloadHistory, DownloadService, format_duration
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class WorkerError:
+    exception: Exception
+    traceback: str
 
 
 class WorkerSignals(QObject):
@@ -34,7 +44,7 @@ class Worker(QRunnable):
             kwargs = {"progress": self.signals.progress.emit} if self.with_progress else {}
             self.signals.result.emit(self.function(*self.args, **kwargs))
         except Exception as exc:
-            self.signals.error.emit(exc)
+            self.signals.error.emit(WorkerError(exc, traceback.format_exc()))
 
 
 class MainWindow(QMainWindow):
@@ -94,8 +104,8 @@ class MainWindow(QMainWindow):
         try: self._save_credentials()
         except OSError: QMessageBox.warning(self, "MANGO Downloader", "Не удалось безопасно сохранить ключи.")
 
-    def _check_error(self, _):
-        logging.getLogger(__name__).exception("Connection check failed", exc_info=_)
+    def _check_error(self, error):
+        logger.error("Connection check failed: %s\n%s", error.exception, error.traceback)
         self.check_button.setEnabled(True); self.connection_status.clear(); QMessageBox.warning(self, "MANGO Downloader", "Не удалось подключиться к MANGO.\n\nПроверьте API Key и API Salt.")
 
     def _find(self):
@@ -113,8 +123,8 @@ class MainWindow(QMainWindow):
             for column, value in enumerate(values, 1): self.table.setItem(row, column, QTableWidgetItem(value))
         self.table.resizeColumnsToContents()
 
-    def _calls_error(self, _):
-        logging.getLogger(__name__).exception("Call search failed", exc_info=_)
+    def _calls_error(self, error):
+        logger.error("Call search failed: %s\n%s", error.exception, error.traceback)
         self.find_button.setEnabled(True); self.find_button.setText("Найти звонки"); QMessageBox.warning(self, "MANGO Downloader", "MANGO не вернул список звонков.\nПопробуйте повторить запрос.")
 
     def _select_all(self):
@@ -134,6 +144,6 @@ class MainWindow(QMainWindow):
     def _progress(self, done, total): self.progress.setMaximum(total); self.progress.setValue(done); self.progress.setFormat(f"Скачано {done} из {total}")
     def _download_ok(self, summary):
         self.download_button.setEnabled(True); self.download_button.setText("Скачать выбранные"); QMessageBox.information(self, "MANGO Downloader", f"Скачивание завершено.\n\nСкачано: {summary.downloaded}\nПропущено: {summary.skipped}\nОшибок: {summary.errors}")
-    def _download_error(self, _):
-        logging.getLogger(__name__).exception("Download operation failed", exc_info=_)
+    def _download_error(self, error):
+        logger.error("Download operation failed: %s\n%s", error.exception, error.traceback)
         self.download_button.setEnabled(True); self.download_button.setText("Скачать выбранные"); QMessageBox.warning(self, "MANGO Downloader", "Не удалось выполнить скачивание. Подробности записаны в журнал.")

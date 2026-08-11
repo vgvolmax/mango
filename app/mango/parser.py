@@ -37,6 +37,24 @@ def _extract_entries(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return entries
 
 
+def _extract_abonent_name(call: dict[str, Any]) -> str | None:
+    call_type = call.get("call_type")
+    if call_type not in {"user", "number"}:
+        return None
+    info = call.get("call_abonent_info")
+    if isinstance(info, dict):
+        if call_type != "user":
+            return None
+        name = str(info.get("name") or info.get("fio") or "").strip()
+    else:
+        name = str(info or "").strip()
+    if not name:
+        return None
+    if call_type == "number" and name.replace("+", "", 1).isdigit():
+        return None
+    return name
+
+
 def parse_calls(payload: dict[str, Any]) -> list[CallRecord]:
     result: list[CallRecord] = []
     for entry in _extract_entries(payload):
@@ -56,14 +74,9 @@ def parse_calls(payload: dict[str, Any]) -> list[CallRecord]:
                 value = str(recording_id).strip()
                 if value and value not in recordings:
                     recordings.append(value)
-            if call.get("call_type") == "user":
-                info = call.get("call_abonent_info")
-                if isinstance(info, dict):
-                    name = str(info.get("name") or info.get("fio") or "").strip()
-                else:
-                    name = str(info or "").strip()
-                if name and name not in names:
-                    names.append(name)
+            name = _extract_abonent_name(call)
+            if name and name not in names:
+                names.append(name)
         result.append(CallRecord(
             entry_id=str(entry.get("entry_id", "")), direction=direction,
             started_at=_timestamp(entry.get("context_start_time")),

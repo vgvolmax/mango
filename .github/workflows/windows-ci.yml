@@ -37,5 +37,8 @@ jobs:
       - name: Test embedded runtime and application imports
         shell: pwsh
         run: |
+          $env:MANGO_APP_ROOT = (Resolve-Path dist/smoke).Path
           & dist/smoke/runtime/python.exe -c "import app; import app.main; import PySide6; import requests; assert app.__version__ == '0.2.0'"
           if ($LASTEXITCODE -ne 0) { throw "Embedded runtime smoke-test failed" }
+          & dist/smoke/runtime/python.exe -c "import os; from pathlib import Path; from app.core.paths import AppPaths; assert AppPaths.discover().root == Path(os.environ['MANGO_APP_ROOT'])"
+          if ($LASTEXITCODE -ne 0) { throw "Portable runtime root smoke-test failed" }

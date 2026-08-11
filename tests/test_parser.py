@@ -53,3 +53,31 @@ def test_parser_keeps_legacy_dict_envelope_tolerance():
     calls = parse_calls({"data": {"list": [{"entry_id": "legacy"}]}})
 
     assert [call.entry_id for call in calls] == ["legacy"]
+
+
+def test_parser_extracts_employee_from_real_outbound_number_call():
+    payload = {"status": "complete", "data": [{"list": [{
+        "entry_id": "out-1", "context_type": 2,
+        "context_calls": [{"call_type": "number", "call_abonent_info": "Иванов",
+                           "recording_id": ["rec-1"]}],
+    }]}]}
+
+    assert parse_calls(payload)[0].employee_names == ("Иванов",)
+
+
+def test_parser_does_not_treat_external_number_as_employee():
+    payload = {"status": "complete", "data": [{"list": [{
+        "entry_id": "out-2", "context_type": 2,
+        "context_calls": [{"call_type": "number", "call_abonent_info": "79991234567"}],
+    }]}]}
+
+    assert parse_calls(payload)[0].employee_names == ()
+
+
+def test_parser_extracts_fio_and_keeps_employee_order_unique():
+    payload = {"data": [{"list": [{"entry_id": "e", "context_calls": [
+        {"call_type": "user", "call_abonent_info": {"fio": "Иванов Иван"}},
+        {"call_type": "number", "call_abonent_info": "Иванов Иван"},
+    ]}]}]}
+
+    assert parse_calls(payload)[0].employee_names == ("Иванов Иван",)
