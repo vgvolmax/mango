@@ -74,6 +74,6 @@ Do not reintroduce:
 - Build-Portable.bat
 - scripts/build_portable.ps1
 - dist/MangoDownloader-portable.zip as end-user distribution
-- bundled `runtime/` as canonical source-ZIP runtime
+- bundled `runtime/` as a canonical clean repository folder runtime
 - system Python requirement
 - admin/UAC requirement

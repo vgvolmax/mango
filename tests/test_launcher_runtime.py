@@ -5,33 +5,39 @@ import pytest
 from scripts.launcher.launcher import parse_lock_file
 
 
-def test_lock_parser_normalizes_names_and_returns_all_exact_pins(tmp_path: Path):
+VALID_HASH = "a" * 64
+
+
+def test_lock_parser_normalizes_names_and_returns_pins_and_hashes(tmp_path: Path):
     lock = tmp_path / "runtime.lock"
     lock.write_text(
-        "PySide6==1.2.3\nRequests==4.5.6\ncharset_normalizer==7.8.9\n",
+        f"PySide6==1.2.3 \\\n    --hash=sha256:{VALID_HASH} \\\n    --hash=sha256:{'b' * 64}\n"
+        f"Requests==4.5.6 \\\n    --hash=sha256:{'c' * 64}\n",
         encoding="utf-8",
     )
 
-    assert parse_lock_file(lock) == {
-        "pyside6": "1.2.3",
-        "requests": "4.5.6",
-        "charset-normalizer": "7.8.9",
+    parsed = parse_lock_file(lock)
+    assert parsed.pins == {"pyside6": "1.2.3", "requests": "4.5.6"}
+    assert parsed.hashes == {
+        "pyside6": (VALID_HASH, "b" * 64),
+        "requests": ("c" * 64,),
     }
 
 
 @pytest.mark.parametrize(
     "invalid",
     [
-        "PySide6>=1\nrequests==1\n",
-        "PySide6==1; python_version>'3'\nrequests==1\n",
-        "PySide6 @ https://example.invalid/package.whl\nrequests==1\n",
-        "-r other.txt\nPySide6==1\nrequests==1\n",
-        "--index-url https://example.invalid\nPySide6==1\nrequests==1\n",
-        "-e example\nPySide6==1\nrequests==1\n",
-        "PySide6==1\npyside6==1\nrequests==1\n",
+        "PySide6==1\n",
+        f"PySide6==1 \\\n    --hash=md5:{VALID_HASH}\n",
+        "PySide6==1 \\\n    --hash=sha256:123\n",
+        f"PySide6==1 \\\n    --hash=sha256:{VALID_HASH}\n--index-url https://example.com\n",
+        f"requests>=1 \\\n    --hash=sha256:{VALID_HASH}\n",
+        f"package @ https://example.com/package.whl \\\n    --hash=sha256:{VALID_HASH}\n",
+        f"PySide6==1 \\\n    --hash=sha256:{VALID_HASH}\npyside6==1 \\\n    --hash=sha256:{'b' * 64}\nrequests==1 \\\n    --hash=sha256:{'c' * 64}\n",
+        f"PySide6==1 \\\n    --hash=sha256:{VALID_HASH} \\\n    --hash=sha256:{VALID_HASH}\nrequests==1 \\\n    --hash=sha256:{'c' * 64}\n",
     ],
 )
-def test_lock_parser_rejects_non_exact_or_duplicate_requirements(tmp_path: Path, invalid: str):
+def test_lock_parser_rejects_unsafe_unhashed_or_duplicate_requirements(tmp_path: Path, invalid: str):
     lock = tmp_path / "runtime.lock"
     lock.write_text(invalid, encoding="utf-8")
 
@@ -41,7 +47,10 @@ def test_lock_parser_rejects_non_exact_or_duplicate_requirements(tmp_path: Path,
 
 def test_lock_parser_requires_application_entry_packages(tmp_path: Path):
     lock = tmp_path / "runtime.lock"
-    lock.write_text("requests==1\n", encoding="utf-8")
+    lock.write_text(
+        f"requests==1 \\\n    --hash=sha256:{VALID_HASH}\n",
+        encoding="utf-8",
+    )
 
     with pytest.raises(ValueError, match="PySide6 and requests"):
         parse_lock_file(lock)

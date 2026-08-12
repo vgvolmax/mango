@@ -103,3 +103,12 @@ def test_handoff_holds_lock_and_runtime_smoke_bypasses_launcher():
     assert "$env:MANGO_BOOTSTRAP_LOCK_HELD = '1'" in text
     assert "Remove-Item Env:MANGO_BOOTSTRAP_LOCK_HELD" in text
     assert text.index("Remove-Item Env:MANGO_BOOTSTRAP_LOCK_HELD") < text.index("$Lock.Unlock(0,1)")
+
+
+def test_runtime_smoke_does_not_require_pip_manifest():
+    text = (ROOT / "scripts/launcher/bootstrap.ps1").read_text(encoding="utf-8")
+    validation = text.split("$manifest = Get-Content", 1)[1].split("Write-Host '[1/3]", 1)[0]
+
+    assert "$manifest.python" in validation
+    assert "$manifest.download_hosts" in validation
+    assert "$manifest.pip" not in validation
