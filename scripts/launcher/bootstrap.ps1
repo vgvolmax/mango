@@ -238,6 +238,7 @@ try {
 
     $manifest = Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json
     if ([int]$manifest.schema_version -ne 1 -or $null -eq $manifest.python -or
+        $null -eq $manifest.download_hosts -or @($manifest.download_hosts).Count -eq 0 -or
         [string]::IsNullOrWhiteSpace([string]$manifest.python.version) -or
         [string]::IsNullOrWhiteSpace([string]$manifest.python.url) -or
         [string]$manifest.python.sha256 -notmatch '^[0-9a-f]{64}$' -or
@@ -245,7 +246,7 @@ try {
         throw 'Invalid runtime manifest.'
     }
 
-    Write-Host '[1/1] Preparing portable Python...'
+    Write-Host '[1/3] Preparing portable Python...'
     if (-not (Test-PortablePython $PythonDir $manifest.python)) {
         Install-PortablePython $manifest.python ([string[]]$manifest.download_hosts)
     }
@@ -255,12 +256,14 @@ try {
     Write-Host 'Portable Python: verified and ready'
 
     if ($RuntimeSmoke) {
-        & (Join-Path $PythonDir 'python.exe') -c "import platform; assert platform.python_version() == '3.13.7'"
+        & (Join-Path $PythonDir 'python.exe') -c 'import platform, sys; assert platform.python_version() == sys.argv[1]' ([string]$manifest.python.version)
         if ($LASTEXITCODE -ne 0) { throw 'Portable Python runtime smoke failed.' }
     }
     else {
-        Write-Host 'Portable Python is ready.'
-        Write-Host 'MANGO application launch will be connected in PR2.'
+        $mode = if ($args -contains '--smoke') { '--smoke' } else { 'start' }
+        $env:MANGO_BOOTSTRAP_LOCK_HELD = '1'
+        & (Join-Path $PythonDir 'python.exe') (Join-Path $PSScriptRoot 'launcher.py') $mode
+        if ($LASTEXITCODE -ne 0) { throw 'Application launcher failed. See .runtime\logs\launcher.log.' }
     }
 }
 catch {
@@ -268,6 +271,7 @@ catch {
     exit 1
 }
 finally {
+    Remove-Item Env:MANGO_BOOTSTRAP_LOCK_HELD -ErrorAction SilentlyContinue
     if ($lockHeld) { $Lock.Unlock(0,1) }
     $Lock.Dispose()
 }

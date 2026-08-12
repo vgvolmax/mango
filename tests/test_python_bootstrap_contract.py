@@ -40,7 +40,7 @@ def test_python_manifest_matches_auto_offer_reference():
     }
 
 
-def test_pr1_contains_no_mango_dependency_bootstrap():
+def test_bootstrap_forbids_unsafe_or_competing_installers():
     paths = [
         ROOT / "Start.bat",
         ROOT / "scripts/launcher/bootstrap.ps1",
@@ -52,11 +52,9 @@ def test_pr1_contains_no_mango_dependency_bootstrap():
         "pip.pyz",
         "get-pip.py",
         "ensurepip",
-        "pyside6",
-        "requests",
-        "site-packages",
-        "app.main",
-        "launcher.py",
+        "bootstrap.pypa.io",
+        "invoke-webrequest",
+        "get-filehash",
     ):
         assert forbidden not in text
 
@@ -96,3 +94,21 @@ def test_bootstrap_downloader_matches_auto_offer_timeouts_and_async_read():
     assert "[Net.Http.HttpCompletionOption]::ResponseHeadersRead" in text
     assert "$response.Content.Headers.ContentLength" in text
     assert "$input.Read($buffer" not in text
+
+
+def test_handoff_holds_lock_and_runtime_smoke_bypasses_launcher():
+    text = (ROOT / "scripts/launcher/bootstrap.ps1").read_text(encoding="utf-8")
+    runtime_branch = text.split("if ($RuntimeSmoke)", 1)[1].split("else", 1)[0]
+    assert "launcher.py" not in runtime_branch
+    assert "$env:MANGO_BOOTSTRAP_LOCK_HELD = '1'" in text
+    assert "Remove-Item Env:MANGO_BOOTSTRAP_LOCK_HELD" in text
+    assert text.index("Remove-Item Env:MANGO_BOOTSTRAP_LOCK_HELD") < text.index("$Lock.Unlock(0,1)")
+
+
+def test_runtime_smoke_does_not_require_pip_manifest():
+    text = (ROOT / "scripts/launcher/bootstrap.ps1").read_text(encoding="utf-8")
+    validation = text.split("$manifest = Get-Content", 1)[1].split("Write-Host '[1/3]", 1)[0]
+
+    assert "$manifest.python" in validation
+    assert "$manifest.download_hosts" in validation
+    assert "$manifest.pip" not in validation

@@ -13,7 +13,7 @@ jobs:
       - name: pytest
         run: python -m pytest -v
       - name: compileall
-        run: python -m compileall -q app tests
+        run: python -m compileall -q app tests scripts/launcher
       - name: Python bootstrap parity acceptance
         shell: pwsh
         run: |
@@ -51,6 +51,16 @@ jobs:
               throw "Bootstrap output is missing: $path"
             }
           }
+
+          $manifestPath = 'scripts/launcher/runtime-manifest.json'
+          $manifestOriginal = Get-Content $manifestPath -Raw
+          $pythonOnlyManifest = $manifestOriginal | ConvertFrom-Json
+          $pythonOnlyManifest.PSObject.Properties.Remove('pip')
+          $pythonOnlyManifest | ConvertTo-Json -Depth 8 | Set-Content $manifestPath -Encoding UTF8
+          & cmd.exe /d /c 'Start.bat --runtime-smoke'
+          if ($LASTEXITCODE -ne 0) { throw 'Python bootstrap incorrectly requires the pip manifest' }
+          $manifestOriginal | Set-Content $manifestPath -Encoding UTF8 -NoNewline
+
           & '.runtime/python/python.exe' -c "import platform; assert platform.python_version() == '3.13.7'"
           if ($LASTEXITCODE -ne 0) { throw 'Installed Python version validation failed' }
 
@@ -61,8 +71,6 @@ jobs:
             throw 'Install receipt does not match the runtime manifest'
           }
 
-          $manifestPath = 'scripts/launcher/runtime-manifest.json'
-          $manifestOriginal = Get-Content $manifestPath -Raw
           $receiptBefore = Get-FileHash '.runtime/python/install-receipt.json'
           $pythonTimeBefore = (Get-Item '.runtime/python/python.exe').LastWriteTimeUtc
           $archiveTimeBefore = (Get-Item '.runtime/downloads/python.zip').LastWriteTimeUtc
@@ -94,3 +102,70 @@ jobs:
           }
           & '.runtime/python/python.exe' -c "import platform; assert platform.python_version() == '3.13.7'"
           if ($LASTEXITCODE -ne 0) { throw 'Repaired Python validation failed' }
+      - name: Clean repository folder application acceptance
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $source = 'C:\CI Work\Тест MANGO\Mango Downloader'
+          Set-Location $source
+          Remove-Item '.runtime','data','logs','downloads' -Recurse -Force -ErrorAction SilentlyContinue
+          $env:PATH = @("$env:SystemRoot\System32", "$env:SystemRoot", "$env:SystemRoot\System32\WindowsPowerShell\v1.0") -join ';'
+          if (Get-Command python -ErrorAction SilentlyContinue) { throw 'System Python remains visible' }
+
+          $env:PIP_INDEX_URL = 'https://bootstrap-must-ignore.invalid/simple'
+          $env:PIP_EXTRA_INDEX_URL = 'https://bootstrap-must-ignore.invalid/simple'
+          $env:PIP_REQUIRE_VIRTUALENV = '1'
+          Set-Location 'C:\Windows\Temp'
+          & cmd.exe /d /c ('"' + (Join-Path $source 'Start.bat') + '" --smoke')
+          if ($LASTEXITCODE -ne 0) { throw 'Full first-run smoke failed' }
+          Remove-Item Env:PIP_INDEX_URL, Env:PIP_EXTRA_INDEX_URL, Env:PIP_REQUIRE_VIRTUALENV -ErrorAction SilentlyContinue
+          Set-Location $source
+          $required = @(
+            '.runtime/python/python.exe', '.runtime/python/pythonw.exe',
+            '.runtime/downloads/pip-*.whl', '.runtime/pip/pip', '.runtime/pip/install-receipt.json', '.runtime/site-packages',
+            '.runtime/dependencies-receipt.json', '.runtime/logs/launcher.log'
+          )
+          foreach ($path in $required) { if (-not (Test-Path $path)) { throw "Missing application runtime output: $path" } }
+          $manifest = Get-Content 'scripts/launcher/runtime-manifest.json' -Raw | ConvertFrom-Json
+          $pipReceipt = Get-Content '.runtime/pip/install-receipt.json' -Raw | ConvertFrom-Json
+          if ($pipReceipt.version -cne $manifest.pip.version -or $pipReceipt.sha256 -cne $manifest.pip.sha256) { throw 'pip receipt mismatch' }
+          $dependencyReceipt = Get-Content '.runtime/dependencies-receipt.json' -Raw | ConvertFrom-Json
+          $lockHash = (Get-FileHash 'requirements/runtime-win-x64.lock.txt' -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($dependencyReceipt.launcher_version -cne $manifest.launcher_version -or
+              $dependencyReceipt.python_version -cne $manifest.python.version -or
+              $dependencyReceipt.pip_version -cne $manifest.pip.version -or
+              $dependencyReceipt.pip_sha256 -cne $manifest.pip.sha256 -or
+              $dependencyReceipt.requirements_sha256 -cne $lockHash) { throw 'dependency receipt mismatch' }
+
+          $dependencyHash = (Get-FileHash '.runtime/dependencies-receipt.json').Hash
+          $pipHash = (Get-FileHash '.runtime/pip/install-receipt.json').Hash
+          $pythonTime = (Get-Item '.runtime/python/python.exe').LastWriteTimeUtc
+          $pipTime = (Get-Item '.runtime/pip/pip/__init__.py').LastWriteTimeUtc
+          $qtTime = (Get-Item '.runtime/site-packages/PySide6/__init__.py').LastWriteTimeUtc
+          $requestsTime = (Get-Item '.runtime/site-packages/requests/__init__.py').LastWriteTimeUtc
+          $env:HTTP_PROXY = 'http://127.0.0.1:9'
+          $env:HTTPS_PROXY = 'http://127.0.0.1:9'
+          $env:PIP_NO_INDEX = '1'
+          & cmd.exe /d /c 'Start.bat --smoke'
+          if ($LASTEXITCODE -ne 0) { throw 'Offline second-run smoke failed' }
+          if ((Get-FileHash '.runtime/dependencies-receipt.json').Hash -cne $dependencyHash -or
+              (Get-FileHash '.runtime/pip/install-receipt.json').Hash -cne $pipHash -or
+              (Get-Item '.runtime/python/python.exe').LastWriteTimeUtc -ne $pythonTime -or
+              (Get-Item '.runtime/pip/pip/__init__.py').LastWriteTimeUtc -ne $pipTime -or
+              (Get-Item '.runtime/site-packages/PySide6/__init__.py').LastWriteTimeUtc -ne $qtTime -or
+              (Get-Item '.runtime/site-packages/requests/__init__.py').LastWriteTimeUtc -ne $requestsTime) {
+            throw 'Prepared runtime changed during offline reuse'
+          }
+
+          Remove-Item Env:HTTP_PROXY, Env:HTTPS_PROXY, Env:PIP_NO_INDEX -ErrorAction SilentlyContinue
+          '{"schema_version":0}' | Set-Content '.runtime/dependencies-receipt.json' -Encoding UTF8
+          & cmd.exe /d /c 'Start.bat --smoke'
+          if ($LASTEXITCODE -ne 0) { throw 'Dependency receipt repair failed' }
+          $receipt = Get-Content '.runtime/dependencies-receipt.json' -Raw | ConvertFrom-Json
+          if ($receipt.schema_version -ne 1 -or $receipt.launcher_version -cne $manifest.launcher_version) { throw 'Dependency receipt was not repaired' }
+
+          '{"schema_version":0}' | Set-Content '.runtime/pip/install-receipt.json' -Encoding UTF8
+          & cmd.exe /d /c 'Start.bat --smoke'
+          if ($LASTEXITCODE -ne 0) { throw 'pip receipt repair failed' }
+          $repairedPip = Get-Content '.runtime/pip/install-receipt.json' -Raw | ConvertFrom-Json
+          if ($repairedPip.version -cne $manifest.pip.version -or $repairedPip.sha256 -cne $manifest.pip.sha256) { throw 'pip receipt was not repaired' }
